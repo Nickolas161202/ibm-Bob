@@ -18,11 +18,11 @@ import sys
 import os
 
 # Adiciona o diretório raiz ao path para permitir execução direta
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from simulator.engine import SimulatorEngine
-from simulator.portfolio import InvestorProfile
-from simulator.fixed_income import FixedIncomeType
+from src.Simulator.engine import SimulatorEngine
+from src.Simulator.portfolio import InvestorProfile
+from src.Simulator.fixed_income import FixedIncomeType
 import json
 import io
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
