@@ -1,258 +1,303 @@
 """
-demo.py
+main.py
 -------
-Interface CLI de demonstração do simulador.
+Ponto de entrada da aplicação — State Machine da interface gráfica.
 
-Simula um ciclo de quest completo:
-  - Cria perfil de investidor
-  - Deposita aporte mensal
-  - Permite operações de compra/venda
-  - Avança ciclos e exibe resultados narrativos
-  - Mostra snapshot final com métricas para o agente
+Diagrama de estados (states_ibm.json):
 
-Execute com:  python -m simulator.demo
+  ┌─────────────┐  Dont have profile  ┌───────────────────┐
+  │   Inicial   │────────────────────►│  Criação de Perfil│
+  │             │  Already has profile│                   │
+  │             │────────────────────►│  Geração da Quest ◄┘
+  └─────────────┘                     └────────┬──────────┘
+                                               │
+                                               ▼
+                                    ┌──────────────────────┐
+                           ┌───────►│  InitialPage Simulator│◄──────┐
+                           │        └──┬───────────────┬───┘        │
+                           │  back     │ User Goes To  │ User goes  │ back
+                           │           ▼               ▼            │
+                           │  ┌──────────────┐  ┌──────────────┐   │
+                           └──│  Low Risk    │  │  High Risk   │───┘
+                              └──────────────┘  └──────────────┘
+                                               │ User Done?
+                                               ▼
+                                    ┌──────────────────────┐
+                                    │   Debriefing Page    │
+                                    └──────────┬───────────┘
+                                               │
+                                               ▼
+                                    ┌──────────────────────┐
+                                    │      End Month       │
+                                    └──────────┬───────────┘
+                                               │ (loop)
+                                               ▼
+                                           Inicial
 """
 
 from __future__ import annotations
-import sys
-import os
 
-# Adiciona o diretório raiz ao path para permitir execução direta
+import os
+import sys
+from enum import Enum, auto
+from typing import Optional
+
+import customtkinter as ctk
+
+# ── path setup ───────────────────────────────────────────────────────────────
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# ── simulator engine ──────────────────────────────────────────────────────────
 from src.Simulator.engine import SimulatorEngine
 from src.Simulator.portfolio import InvestorProfile
-from src.Simulator.fixed_income import FixedIncomeType
-import json
-import io
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+
+# ── interface pages ───────────────────────────────────────────────────────────
+from src.Interfaces.initial import InitialPage
+from src.Interfaces.createProfile import CreateProfilePage
+from src.Interfaces.questGenerated import QuestGeneratedPage
+from src.Interfaces.mainPage import MainPage
+from src.Interfaces.lowRiskInvestments import LowRiskInvestmentsPage
+from src.Interfaces.highRiskInvestments import HighRiskInvestmentsPage
+from src.Interfaces.debriefing import DebriefingPage
+from src.Interfaces.endOfMonth import EndOfMonthPage
 
 
-# ---------------------------------------------------------------------------
-# Helpers de exibição
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────────
+# State enumeration — mirrors every node in states_ibm.json
+# ─────────────────────────────────────────────────────────────────────────────
 
-def print_header(title: str):
-    print(f"\n{'─'*60}")
-    print(f"  {title}")
-    print(f"{'─'*60}")
-
-
-def print_market(engine: SimulatorEngine):
-    snap = engine.market_snapshot()
-    m = snap["market"]
-    print_header("ESTADO DO MERCADO")
-    print(f"  SELIC:    {m['selic_annual_pct']:.2f}% a.a.  ({m['selic_monthly_pct']:.4f}% a.m.)")
-    print(f"  CDI:      {m['cdi_annual_pct']:.2f}% a.a.")
-    print(f"  Inflacao: ~{m['inflation_annual_pct']:.1f}% a.a.")
-
-    print("\n  -- Acoes --")
-    print(f"  {'Ticker':<8} {'Nome':<25} {'Preco':>8} {'Var%':>7}  Trend")
-    print(f"  {'─'*8} {'─'*25} {'─'*8} {'─'*7}  {'─'*15}")
-    for t, s in snap["stocks"].items():
-        var = s["change_pct"]
-        arrow = "^" if var > 0 else ("v" if var < 0 else "-")
-        print(
-            f"  {s['ticker']:<8} {s['name']:<25} "
-            f"R${s['price']:>6.2f}  {arrow}{abs(var):>5.1f}%  {s['trend']}"
-        )
-
-    print("\n  -- Renda Fixa --")
-    for pt, p in snap["fixed_products"].items():
-        maturity = f"{p['maturity_months']}m" if p["maturity_months"] > 0 else "livre"
-        ir_tag = "* IR Isento" if p["ir_exempt"] else ""
-        print(
-            f"  [{p['label']:<22}]  {p['description'][:45]:<45}  "
-            f"min: R${p['min_investment']:.0f}  prazo: {maturity}  {ir_tag}"
-        )
+class AppState(Enum):
+    INICIAL              = auto()   # i2zG1y6y6l51
+    CREATE_PROFILE       = auto()   # u2zG367~7dvM
+    QUEST_GENERATED      = auto()   # B2zGtmQY~6EB
+    SIMULATOR_MAIN       = auto()   # K3zGYcP4SeMW
+    LOW_RISK             = auto()   # d4zGHF4CtUvb
+    HIGH_RISK            = auto()   # x4zG6X-rLHkF
+    DEBRIEFING           = auto()   # p5zGgpEZZiCr
+    END_MONTH            = auto()   # F5zGDV1C7XfM
 
 
-def print_portfolio(engine: SimulatorEngine, portfolio):
-    snap = engine.snapshot(portfolio)
-    print_header(f"PORTFOLIO — Ciclo {snap['cycle']}")
-    print(f"  Patrimonio Liquido:  R$ {snap['net_worth']:,.2f}")
-    print(f"  Caixa disponivel:    R$ {snap['cash']:,.2f}")
+# ─────────────────────────────────────────────────────────────────────────────
+# Application — state machine + frame management
+# ─────────────────────────────────────────────────────────────────────────────
 
-    alloc = snap["allocation"]
-    print(
-        f"  Alocacao:  Caixa {alloc['cash_pct']}%  |  "
-        f"Renda Fixa {alloc['fixed_pct']}%  |  "
-        f"Acoes {alloc['stocks_pct']}%"
-    )
+class App(ctk.CTk):
+    """
+    Root window that owns the state machine.
 
-    ef = snap["emergency_fund"]
-    status = "[OK]" if ef["adequate"] else "[ATENCAO]"
-    print(
-        f"\n  {status} Reserva de Emergencia: "
-        f"R$ {ef['liquid_assets']:,.2f} / R$ {ef['target']:,.2f} "
-        f"({ef['completion_pct']}%)"
-    )
+    Only one CTkFrame (page) is visible at a time.
+    Transitions are driven by callbacks passed into each page.
+    """
 
-    gp = snap["goal_progress"]
-    achieved = "[META ATINGIDA]" if gp["achieved"] else "[META]"
-    print(
-        f"  {achieved} Objetivo [{gp['goal']}]: "
-        f"R$ {gp['current_net_worth']:,.2f} / R$ {gp['goal_amount']:,.2f} "
-        f"({gp['completion_pct']}%)"
-    )
+    def __init__(self):
+        super().__init__()
+        self.title("Simulador de Investimentos — Reino das Finanças")
+        self.geometry("680x560")
+        self.resizable(False, False)
 
-    if snap["fixed_positions"]:
-        print("\n  -- Renda Fixa --")
-        for i, p in enumerate(snap["fixed_positions"]):
-            liquid = "[liquido]" if p["can_redeem"] else f"[bloqueado {p['months_held']}m]"
-            print(
-                f"  [{i}] {p['product']:<22}  "
-                f"R$ {p['principal_with_earnings']:,.2f}  "
-                f"(+R$ {p['gross_earnings']:.2f} bruto)  "
-                f"liquido: R$ {p['net_redemption_value']:,.2f}  {liquid}"
+        # ── simulator state ───────────────────────────────────────────────────
+        self._engine: Optional[SimulatorEngine] = None
+        self._profile: Optional[InvestorProfile] = None
+        self._last_cycle_result = None   # CycleResult from advance_cycle()
+
+        # ── current frame reference (for clean destroy) ───────────────────────
+        self._current_frame: Optional[ctk.CTkFrame] = None
+
+        # ── start ─────────────────────────────────────────────────────────────
+        self._transition(AppState.INICIAL)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Core transition method
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _transition(self, state: AppState):
+        """Destroy the current page and instantiate the next one."""
+        if self._current_frame is not None:
+            self._current_frame.destroy()
+            self._current_frame = None
+
+        frame = self._build_state(state)
+        frame.pack(fill="both", expand=True)
+        self._current_frame = frame
+
+    def _build_state(self, state: AppState) -> ctk.CTkFrame:
+        """Factory — returns the CTkFrame for the given state."""
+
+        # ── INICIAL ───────────────────────────────────────────────────────────
+        if state == AppState.INICIAL:
+            def on_next():
+                if self._profile is not None:
+                    # Already has a profile → skip creation, go to quest
+                    self._transition(AppState.QUEST_GENERATED)
+                else:
+                    # No profile yet → create one
+                    self._transition(AppState.CREATE_PROFILE)
+
+            return InitialPage(
+                master=self,
+                on_next=on_next,
+                fg_color="transparent",
             )
 
-    if snap["stock_positions"]:
-        print("\n  -- Acoes --")
-        for p in snap["stock_positions"]:
-            pnl_sign = "+" if p["unrealized_pnl"] >= 0 else ""
-            print(
-                f"  {p['ticker']:<8}  {p['shares']:.4f} acoes  "
-                f"P.medio: R${p['avg_purchase_price']:.2f}  "
-                f"Atual: R${p['current_price']:.2f}  "
-                f"Valor: R${p['current_value']:,.2f}  "
-                f"P&L: {pnl_sign}R${p['unrealized_pnl']:.2f} ({pnl_sign}{p['unrealized_pnl_pct']}%)"
+        # ── CREATE_PROFILE ────────────────────────────────────────────────────
+        if state == AppState.CREATE_PROFILE:
+            def on_submit(profile: InvestorProfile):
+                self._profile = profile
+                self._engine = SimulatorEngine()
+                self._engine.create_portfolio(profile, initial_cash=profile.monthly_surplus)
+                self._transition(AppState.QUEST_GENERATED)
+
+            return CreateProfilePage(
+                master=self,
+                on_submit=on_submit,
+                fg_color="transparent",
             )
 
+        # ── QUEST_GENERATED ───────────────────────────────────────────────────
+        if state == AppState.QUEST_GENERATED:
+            def on_start():
+                self._transition(AppState.SIMULATOR_MAIN)
 
-# ---------------------------------------------------------------------------
-# Cenário de demonstração
-# ---------------------------------------------------------------------------
+            return QuestGeneratedPage(
+                master=self,
+                quest_title="O Fundo de Emergência do Rei",
+                quest_description=(
+                    "O reino enfrenta tempos incertos. O conselheiro real recomenda "
+                    "que todo cidadão mantenha uma reserva segura antes de aventurar-se "
+                    "nos mercados de capitais."
+                ),
+                quest_objective=(
+                    f"🎯  Objetivo: acumule R$ "
+                    f"{(self._profile.monthly_expenses * 4):,.2f} em ativos líquidos."
+                    if self._profile else "🎯  Objetivo: acumular uma reserva de emergência."
+                ),
+                on_start=on_start,
+                fg_color="transparent",
+            )
 
-def run_demo():
-    print("\n" + "="*60)
-    print("  SIMULADOR DE INVESTIMENTOS — MVP Demo")
-    print("  Plataforma de Educacao Financeira")
-    print("="*60)
+        # ── SIMULATOR_MAIN ────────────────────────────────────────────────────
+        if state == AppState.SIMULATOR_MAIN:
+            portfolio = self._current_portfolio()
+            snap = self._engine.snapshot(portfolio) if self._engine and portfolio else {}
 
-    # -- 1. Criar engine e perfil --
-    engine = SimulatorEngine(seed=42)
+            return MainPage(
+                master=self,
+                player_name=self._profile.name if self._profile else "Aventureiro",
+                cash=snap.get("cash", 0.0),
+                net_worth=snap.get("net_worth", 0.0),
+                cycle=snap.get("cycle", 1),
+                on_low_risk=lambda: self._transition(AppState.LOW_RISK),
+                on_high_risk=lambda: self._transition(AppState.HIGH_RISK),
+                on_end_month=lambda: self._transition(AppState.DEBRIEFING),
+                fg_color="transparent",
+            )
 
-    profile = InvestorProfile(
-        user_id="demo-user-001",
-        name="Aldric, o Aprendiz",
-        monthly_income=5000.0,
-        monthly_expenses=3000.0,
-        risk_profile="moderado",
-        knowledge_level="iniciante",
-        goal="Reserva de emergencia de 6 meses",
-        goal_amount=18_000.0,
-        goal_deadline_months=24,
-    )
+        # ── LOW_RISK ──────────────────────────────────────────────────────────
+        if state == AppState.LOW_RISK:
+            def on_invest(label: str, amount: float):
+                # Placeholder — will wire to engine.buy_fixed() in next iteration
+                print(f"[LOW RISK] Investir R$ {amount:.2f} em {label}")
+                self._transition(AppState.SIMULATOR_MAIN)
 
-    portfolio = engine.create_portfolio(profile, initial_cash=0.0)
-    print(f"\n  Personagem criado: {profile.name}")
-    print(f"  Renda mensal: R$ {profile.monthly_income:,.2f}")
-    print(f"  Gastos fixos: R$ {profile.monthly_expenses:,.2f}")
-    print(f"  Sobra mensal: R$ {profile.monthly_surplus:,.2f}")
-    print(f"  Objetivo: {profile.goal} (R$ {profile.goal_amount:,.2f})")
-    print(f"  Prazo: {profile.goal_deadline_months} meses")
-    print(f"  Reserva ideal: R$ {profile.recommended_emergency_fund:,.2f}")
+            return LowRiskInvestmentsPage(
+                master=self,
+                on_invest=on_invest,
+                on_back=lambda: self._transition(AppState.SIMULATOR_MAIN),
+                fg_color="transparent",
+            )
 
-    # -- 2. Estado inicial do mercado --
-    print_market(engine)
+        # ── HIGH_RISK ─────────────────────────────────────────────────────────
+        if state == AppState.HIGH_RISK:
+            def on_buy(ticker: str, amount: float):
+                print(f"[HIGH RISK] Comprar R$ {amount:.2f} de {ticker}")
+                self._transition(AppState.SIMULATOR_MAIN)
 
-    # -- 3. Quest: "Monte sua reserva de emergência" --
-    print_header("QUEST ATIVA: Monte sua Reserva de Emergencia")
-    print(
-        "  Objetivo: Acumular R$ 18.000 em ativos liquidos em 12 meses.\n"
-        "  Dica do Sabio: 'O Tesouro Selic garante liquidez e seguranca.'\n"
-        "  O aventureiro Aldric recebe seu primeiro salario..."
-    )
+            def on_sell(ticker: str, shares: float):
+                print(f"[HIGH RISK] Vender {shares} cotas de {ticker}")
+                self._transition(AppState.SIMULATOR_MAIN)
 
-    # -- 4. Ciclo 1: deposito + alocacao inicial --
-    engine.deposit(portfolio, profile.monthly_surplus, "Aporte inicial")
-    print(f"\n  Deposito: R$ {profile.monthly_surplus:,.2f} no caixa")
+            return HighRiskInvestmentsPage(
+                master=self,
+                on_buy=on_buy,
+                on_sell=on_sell,
+                on_back=lambda: self._transition(AppState.SIMULATOR_MAIN),
+                fg_color="transparent",
+            )
 
-    engine.buy_fixed(portfolio, FixedIncomeType.TESOURO_SELIC, 1000.0)
-    print("  Comprou R$ 1.000 em Tesouro Selic")
+        # ── DEBRIEFING ────────────────────────────────────────────────────────
+        if state == AppState.DEBRIEFING:
+            portfolio = self._current_portfolio()
+            snap = self._engine.snapshot(portfolio) if self._engine and portfolio else {}
+            alloc = snap.get("allocation", {})
 
-    engine.buy_fixed(portfolio, FixedIncomeType.CDB_DAILY, 500.0)
-    print("  Comprou R$ 500 em CDB Liquidez Diaria")
+            # Calculate net-worth change since last cycle
+            nw = snap.get("net_worth", 0.0)
+            history = portfolio.net_worth_history if portfolio else []
+            prev_nw = history[-2] if len(history) >= 2 else history[0] if history else nw
+            change = nw - prev_nw
 
-    # Tambem compra algumas acoes para demonstrar renda variavel (sobram R$500)
-    engine.buy_stock(portfolio, "BRCO3", 300.0)
-    print("  Comprou R$ 300 em BRCO3 (Banco do Reinos)")
+            return DebriefingPage(
+                master=self,
+                player_name=self._profile.name if self._profile else "Aventureiro",
+                net_worth=nw,
+                net_worth_change=change,
+                cash_pct=alloc.get("cash_pct", 0.0),
+                fixed_pct=alloc.get("fixed_pct", 0.0),
+                stocks_pct=alloc.get("stocks_pct", 0.0),
+                cycles_played=snap.get("cycle", 1),
+                agent_feedback=(
+                    "Continue investindo com disciplina! "
+                    "Mantenha sua reserva de emergência antes de buscar maior retorno."
+                ),
+                quest_completed=False,
+                on_continue=lambda: self._transition(AppState.END_MONTH),
+                fg_color="transparent",
+            )
 
-    engine.buy_stock(portfolio, "TCNV5", 150.0)
-    print("  Comprou R$ 150 em TCNV5 (TecnoVentos - alta volatilidade)")
+        # ── END_MONTH ─────────────────────────────────────────────────────────
+        if state == AppState.END_MONTH:
+            result = None
+            if self._engine:
+                result = self._engine.advance_cycle()
+                self._last_cycle_result = result
 
-    print_portfolio(engine, portfolio)
+            market = self._engine.market.summary() if self._engine else {}
 
-    # -- 5. Simular 6 ciclos (6 meses) com aportes mensais --
-    print_header("AVANCANDO 6 MESES SIMULADOS...")
+            return EndOfMonthPage(
+                master=self,
+                cycle=result.cycle if result else 1,
+                market_events=result.market_events if result else [],
+                stock_events=result.stock_events if result else [],
+                fixed_earnings=sum(
+                    v.get("fixed_earnings", 0.0)
+                    for v in (result.portfolio_summaries.values() if result else [])
+                ),
+                selic_pct=market.get("selic_annual_pct", 0.0),
+                inflation_pct=market.get("inflation_annual_pct", 0.0),
+                on_next=lambda: self._transition(AppState.INICIAL),
+                fg_color="transparent",
+            )
 
-    for i in range(6):
-        result = engine.advance_cycle()
-        print(engine.narrative_cycle_summary(result))
+        raise ValueError(f"Unknown state: {state}")
 
-        # Deposito mensal automatico
-        engine.deposit(portfolio, profile.monthly_surplus, f"Aporte mes {result.cycle}")
+    # ─────────────────────────────────────────────────────────────────────────
+    # Helpers
+    # ─────────────────────────────────────────────────────────────────────────
 
-        # Estrategia simples: investir toda a sobra em Tesouro Selic
-        if portfolio.cash >= 1000:
-            to_invest = round(portfolio.cash * 0.8, 2)  # deixa 20% em caixa
-            if to_invest >= 100:
-                engine.buy_fixed(portfolio, FixedIncomeType.TESOURO_SELIC, to_invest)
-                print(f"  Reinvestiu R$ {to_invest:,.2f} em Tesouro Selic")
+    def _current_portfolio(self):
+        """Returns the active Portfolio, or None if not yet created."""
+        if self._engine is None or self._profile is None:
+            return None
+        return self._engine.portfolios.get(self._profile.user_id)
 
-        # No mes 3: compra um pouco de LCA para demonstrar produto com carencia
-        if result.cycle == 3 and portfolio.cash >= 5000:
-            engine.buy_fixed(portfolio, FixedIncomeType.LCA_1Y, 5000.0)
-            print("  Comprou R$ 5.000 em LCA 1 ano (isento de IR)")
 
-    # -- 6. Estado final --
-    print_market(engine)
-    print_portfolio(engine, portfolio)
-
-    # -- 7. Snapshot para o agente de IA --
-    print_header("DADOS PARA O AGENTE DE IA (JSON)")
-    snap = engine.snapshot(portfolio)
-    # Exibe apenas os campos relevantes para geracao de quest
-    agent_context = {
-        "cycle": snap["cycle"],
-        "net_worth": snap["net_worth"],
-        "allocation": snap["allocation"],
-        "emergency_fund": snap["emergency_fund"],
-        "goal_progress": snap["goal_progress"],
-        "market_selic": snap["market"]["selic_annual_pct"],
-        "open_positions": len(snap["fixed_positions"]) + len(snap["stock_positions"]),
-    }
-    print(json.dumps(agent_context, indent=2, ensure_ascii=False))
-
-    # -- 8. Demonstracao de falha de quest (saque indevido) --
-    print_header("DEMO: Tentativa de resgate com carencia")
-
-    # Compra um CDB de 90 dias para demonstrar a carencia
-    engine.deposit(portfolio, 1000.0, "Deposito para demo de carencia")
-    engine.buy_fixed(portfolio, FixedIncomeType.CDB_90, 1000.0)
-    print(f"  Comprou R$ 1.000 em CDB 90 dias (carencia de 3 meses)")
-    print(f"  Ciclo atual: {engine.market.cycle} — carencia termina no ciclo {engine.market.cycle + 3}")
-    print("  Tentando resgatar imediatamente...\n")
-
-    try:
-        cdb_idx = next(
-            i for i, p in enumerate(portfolio.fixed_positions)
-            if not p.can_redeem(engine.market.cycle)
-        )
-        engine.redeem_fixed(portfolio, cdb_idx)
-        print("  [ERRO] Deveria ter bloqueado o resgate!")
-    except ValueError as e:
-        print(f"  Operacao bloqueada corretamente: {e}")
-        print("  Conceito educativo: produtos com carencia nao podem ser")
-        print("  resgatados antes do vencimento — planejamento e essencial!")
-
-    print("\n" + "="*60)
-    print("  Demo concluida com sucesso!")
-    print("  O simulador esta pronto para integracao com o agente de IA")
-    print("  e com o sistema de quests do MVP.")
-    print("="*60 + "\n")
-
+# ─────────────────────────────────────────────────────────────────────────────
+# Entry point
+# ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    run_demo()
+    ctk.set_appearance_mode("dark")
+    ctk.set_default_color_theme("blue")
+
+    app = App()
+    app.mainloop()
