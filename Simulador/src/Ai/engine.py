@@ -516,3 +516,218 @@ CONDIÇÃO DE DERROTA: (o que configura falha — seja explícito)
 DICA INICIAL: (uma orientação educativa curta, sem entregar a solução, focada na fraqueza principal do usuário)"""
 
         return self._bob.send_prompt(prompt)
+
+    def generate_study_content(
+        self,
+        user_profile: dict,
+        simulator_performance: dict,
+        library_summary: dict,
+        requested_topic: str | None = None,
+    ) -> str:
+        """
+        Asks Bob to research, adapt and generate study content for the user.
+
+        The response is a JSON string with the following structure (Bob is
+        instructed to return ONLY valid JSON, no surrounding text):
+
+        {
+          "topic": str,
+          "source_text": str,       // technical / original content
+          "adapted_text": str,      // simplified version for the user's level
+          "quiz": [
+            {
+              "question": str,
+              "options": [str, str, str, str],   // exactly 4 options
+              "correct_index": int,              // 0-based
+              "explanation": str
+            },
+            ...                                  // 3 to 5 questions
+          ]
+        }
+
+        Parameters
+        ----------
+        user_profile         : same shape as generate_quest()'s user_profile
+        simulator_performance: {
+              "avg_score": float,        // 0-100, average across quests
+              "completed_quests": int,
+              "main_weakness": str,      // topic where user struggles most
+              "last_quest_topics": list[str],  // topics from recent quests
+            }
+        library_summary      : output of StudyLibrary.mastery_summary()
+        requested_topic      : if the user explicitly requested a topic, pass it
+                               here; otherwise Bob chooses the most relevant one.
+
+        Returns the raw text response from Bob (expected to be valid JSON).
+        """
+        name            = user_profile.get("name", "Usuário")
+        knowledge_level = user_profile.get("knowledge_level", "iniciante")
+        risk_profile    = user_profile.get("risk_profile", "moderado")
+        goal            = user_profile.get("goal", "não definido")
+
+        avg_score        = simulator_performance.get("avg_score", 0.0)
+        completed_quests = simulator_performance.get("completed_quests", 0)
+        main_weakness    = simulator_performance.get("main_weakness", "não identificada")
+        last_topics      = simulator_performance.get("last_quest_topics", [])
+
+        topics_covered   = library_summary.get("topics_covered", [])
+        mastered_count   = library_summary.get("mastered", 0)
+        unmastered       = library_summary.get("unmastered", 0)
+        best_scores      = library_summary.get("best_quiz_scores", {})
+
+        topics_covered_block = (
+            "\n".join(f"  - {t}" for t in topics_covered)
+            if topics_covered else "  (nenhum ainda)"
+        )
+        best_scores_block = (
+            "\n".join(f"  - {t}: {s}/100" for t, s in best_scores.items() if s is not None)
+            if best_scores else "  (nenhum quiz realizado)"
+        )
+
+        topic_instruction = (
+            f'O usuário pediu explicitamente pelo tema: "{requested_topic}". '
+            "Gere conteúdo sobre este tema independentemente do que já foi coberto."
+            if requested_topic
+            else
+            "Escolha o tema mais relevante para este usuário com base no contexto abaixo. "
+            "Priorize temas que: (1) se relacionam diretamente com a fraqueza identificada "
+            "no simulador, (2) ainda não foram cobertos na biblioteca, ou (3) tiveram "
+            "score de quiz baixo (abaixo de 70)."
+        )
+
+        prompt = f"""=== GERAÇÃO DE CONTEÚDO EDUCATIVO ===
+
+CONTEXTO DO USUÁRIO:
+  Nome            : {name}
+  Nível           : {knowledge_level}
+  Perfil de risco : {risk_profile}
+  Objetivo        : {goal}
+
+DESEMPENHO NO SIMULADOR:
+  Pontuação média : {avg_score:.1f}/100
+  Quests concluídas: {completed_quests}
+  Principal fraqueza: {main_weakness}
+  Temas das últimas quests: {', '.join(last_topics) if last_topics else '(nenhuma)'}
+
+BIBLIOTECA DE ESTUDO ATUAL:
+  Conteúdos dominados : {mastered_count}
+  Conteúdos pendentes : {unmastered}
+  Temas já cobertos:
+{topics_covered_block}
+  Melhores scores de quiz por tema:
+{best_scores_block}
+
+INSTRUÇÃO DE SELEÇÃO DE TEMA:
+{topic_instruction}
+
+---
+Você é um especialista em educação financeira. Sua tarefa é:
+
+1. PESQUISAR o tema escolhido com profundidade técnica — inclua conceitos, mecanismos, fórmulas relevantes e exemplos reais do mercado brasileiro.
+
+2. ADAPTAR esse conteúdo para o nível "{knowledge_level}" do usuário — use linguagem acessível, analogias práticas e exemplos conectados ao objetivo "{goal}" do usuário. NÃO omita a substância, apenas torne-a mais digestível.
+
+3. CRIAR um quiz de 4 perguntas de múltipla escolha (4 opções cada) que teste a compreensão real do tema — não apenas memorização.
+
+Retorne SOMENTE o JSON abaixo, sem texto adicional antes ou depois, sem markdown, sem blocos de código:
+
+{{
+  "topic": "<nome do tema escolhido>",
+  "source_text": "<conteúdo técnico completo, em português, com ao menos 3 parágrafos>",
+  "adapted_text": "<versão adaptada e simplificada, em português, com ao menos 3 parágrafos e exemplos práticos>",
+  "quiz": [
+    {{
+      "question": "<pergunta>",
+      "options": ["<A>", "<B>", "<C>", "<D>"],
+      "correct_index": <0-3>,
+      "explanation": "<explicação da resposta correta>"
+    }}
+  ]
+}}"""
+
+        return self._bob.send_prompt(prompt)
+
+    def evaluate_study_mastery(
+        self,
+        topic: str,
+        quiz_results: list[dict],
+        simulator_performance: dict,
+        knowledge_level: str = "iniciante",
+    ) -> str:
+        """
+        Asks Bob to evaluate whether the user has mastered a study topic,
+        based on quiz performance and simulator behavior.
+
+        The response is a JSON string (Bob is instructed to return ONLY JSON):
+
+        {
+          "mastered": bool,
+          "reason": str,          // 1-2 sentence explanation
+          "recommendation": str   // what to study or practice next
+        }
+
+        Parameters
+        ----------
+        topic               : the topic being evaluated
+        quiz_results        : list of QuizResult dicts for this topic:
+                              [{"cycle": int, "score": int, "correct": int, "total": int}, ...]
+        simulator_performance: {
+              "avg_score": float,
+              "completed_quests": int,
+              "main_weakness": str,
+              "topic_related_quests": int,  // quests that touched this topic
+            }
+        knowledge_level     : user's declared level
+
+        Returns the raw text response from Bob (expected to be valid JSON).
+        """
+        avg_score     = simulator_performance.get("avg_score", 0.0)
+        main_weakness = simulator_performance.get("main_weakness", "não identificada")
+        related_quests = simulator_performance.get("topic_related_quests", 0)
+
+        if quiz_results:
+            best_score  = max(r.get("score", 0) for r in quiz_results)
+            last_score  = quiz_results[-1].get("score", 0)
+            attempts    = len(quiz_results)
+            quiz_block  = "\n".join(
+                f"  Tentativa {i+1} (ciclo {r.get('cycle','?')}): "
+                f"{r.get('correct','?')}/{r.get('total','?')} corretas — {r.get('score', 0)}/100"
+                for i, r in enumerate(quiz_results)
+            )
+        else:
+            best_score = last_score = attempts = 0
+            quiz_block = "  (nenhum quiz realizado ainda)"
+
+        prompt = f"""=== AVALIAÇÃO DE DOMÍNIO DO CONTEÚDO ===
+
+TEMA AVALIADO: {topic}
+NÍVEL DO USUÁRIO: {knowledge_level}
+
+RESULTADOS DE QUIZ SOBRE ESTE TEMA:
+{quiz_block}
+  Melhor score: {best_score}/100
+  Último score: {last_score}/100
+  Total de tentativas: {attempts}
+
+DESEMPENHO NO SIMULADOR (contexto geral):
+  Pontuação média : {avg_score:.1f}/100
+  Principal fraqueza identificada: {main_weakness}
+  Quests relacionadas a este tema concluídas: {related_quests}
+
+CRITÉRIOS DE DOMÍNIO SUGERIDOS (use como referência, não como regra rígida):
+  - Quiz: score >= 75 em ao menos uma tentativa
+  - Simulador: pontuação média >= 60 após quests relacionadas ao tema
+  - Consistência: melhora progressiva nos scores de quiz
+
+---
+Com base nos dados acima, avalie se o usuário demonstrou domínio suficiente do tema "{topic}" para avançar para conteúdo mais complexo.
+
+Retorne SOMENTE o JSON abaixo, sem texto adicional:
+
+{{
+  "mastered": <true ou false>,
+  "reason": "<explicação em 1-2 frases do porquê dominado ou não>",
+  "recommendation": "<o que o usuário deve estudar ou praticar a seguir>"
+}}"""
+
+        return self._bob.send_prompt(prompt)
