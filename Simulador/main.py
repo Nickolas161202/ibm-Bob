@@ -8,18 +8,26 @@ Diagrama de estados (states_ibm.json):
   ┌─────────────┐  Dont have profile  ┌───────────────────┐
   │   Inicial   │────────────────────►│  Criação de Perfil│
   │             │  Already has profile│                   │
-  │             │────────────────────►│  Geração da Quest ◄┘
-  └─────────────┘                     └────────┬──────────┘
-                                               │
-                                               ▼
-                                    ┌──────────────────────┐
-                           ┌───────►│  InitialPage Simulator│◄──────┐
-                           │        └──┬───────────────┬───┘        │
-                           │  back     │ User Goes To  │ User goes  │ back
-                           │           ▼               ▼            │
-                           │  ┌──────────────┐  ┌──────────────┐   │
-                           └──│  Low Risk    │  │  High Risk   │───┘
-                              └──────────────┘  └──────────────┘
+  │             │───────────────────┐ └────────┬──────────┘
+  └─────────────┘                   │          │ on_submit
+                                    │          ▼
+                                    │ ┌────────────────────┐
+                                    └►│        Hub         │
+                                      └──┬──────┬──────┬───┘
+                                Missões  │      │      │ Reconfigurar
+                                         ▼      │      ▼
+                              ┌──────────────┐  │  ┌──────────────────┐
+                              │Quest Gerada  │  │  │  Criação Perfil  │
+                              └──────┬───────┘  │  └──────────────────┘
+                                     ▼          │ Estudos (a implementar)
+                           ┌──────────────────────┐
+                  ┌───────►│  Simulador Principal  │◄──────┐
+                  │        └──┬───────────────┬───┘        │
+                  │  back     │ Low Risk      │ High Risk  │ back
+                  │           ▼               ▼            │
+                  │  ┌──────────────┐  ┌──────────────┐   │
+                  └──│  Renda Fixa  │  │ Renda Variável│──┘
+                     └──────────────┘  └──────────────┘
                                                │ User Done?
                                                ▼
                                     ┌──────────────────────┐
@@ -32,7 +40,7 @@ Diagrama de estados (states_ibm.json):
                                     └──────────┬───────────┘
                                                │ (loop)
                                                ▼
-                                           Inicial
+                                             Hub
 """
 
 from __future__ import annotations
@@ -51,6 +59,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from src.Simulator.engine import SimulatorEngine
 from src.Simulator.portfolio import InvestorProfile
 
+# ── study library ─────────────────────────────────────────────────────────────
+import json
+import uuid
+from src.Study.library import StudyLibrary, StudyContent, QuizQuestion
+
 # ── interface pages ───────────────────────────────────────────────────────────
 from src.Interfaces.initial import InitialPage
 from src.Interfaces.createProfile import CreateProfilePage
@@ -60,6 +73,8 @@ from src.Interfaces.lowRiskInvestments import LowRiskInvestmentsPage
 from src.Interfaces.highRiskInvestments import HighRiskInvestmentsPage
 from src.Interfaces.debriefing import DebriefingPage
 from src.Interfaces.endOfMonth import EndOfMonthPage
+from src.Interfaces.hub import HubPage
+from src.Interfaces.studyPage import StudyPage
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -69,6 +84,8 @@ from src.Interfaces.endOfMonth import EndOfMonthPage
 class AppState(Enum):
     INICIAL              = auto()   # i2zG1y6y6l51
     CREATE_PROFILE       = auto()   # u2zG367~7dvM
+    HUB                  = auto()   # menu principal pós-onboarding
+    STUDY                = auto()   # biblioteca de estudos
     QUEST_GENERATED      = auto()   # B2zGtmQY~6EB
     SIMULATOR_MAIN       = auto()   # K3zGYcP4SeMW
     LOW_RISK             = auto()   # d4zGHF4CtUvb
@@ -100,6 +117,11 @@ class App(ctk.CTk):
         self._profile: Optional[InvestorProfile] = None
         self._last_cycle_result = None   # CycleResult from advance_cycle()
 
+        # ── study library (one instance per profile, loaded lazily) ───────────
+        self._study_library: Optional[StudyLibrary] = None
+        # tracks quest scores for mastery evaluation
+        self._quest_scores: list[int] = []
+
         # ── current frame reference (for clean destroy) ───────────────────────
         self._current_frame: Optional[ctk.CTkFrame] = None
 
@@ -127,8 +149,8 @@ class App(ctk.CTk):
         if state == AppState.INICIAL:
             def on_next():
                 if self._profile is not None:
-                    # Already has a profile → skip creation, go to quest
-                    self._transition(AppState.QUEST_GENERATED)
+                    # Already has a profile → go to hub
+                    self._transition(AppState.HUB)
                 else:
                     # No profile yet → create one
                     self._transition(AppState.CREATE_PROFILE)
@@ -145,11 +167,62 @@ class App(ctk.CTk):
                 self._profile = profile
                 self._engine = SimulatorEngine()
                 self._engine.create_portfolio(profile, initial_cash=profile.monthly_surplus)
-                self._transition(AppState.QUEST_GENERATED)
+                self._transition(AppState.HUB)
 
             return CreateProfilePage(
                 master=self,
                 on_submit=on_submit,
+                fg_color="transparent",
+            )
+
+        # ── HUB ───────────────────────────────────────────────────────────────
+        if state == AppState.HUB:
+            portfolio = self._current_portfolio()
+            snap = self._engine.snapshot(portfolio) if self._engine and portfolio else {}
+
+            return HubPage(
+                master=self,
+                player_name=self._profile.name if self._profile else "Aventureiro",
+                cycle=snap.get("cycle", 0),
+                net_worth=snap.get("net_worth", 0.0),
+                on_missions=lambda: self._transition(AppState.QUEST_GENERATED),
+                on_study=lambda: self._transition(AppState.STUDY),
+                on_reconfigure=lambda: self._transition(AppState.CREATE_PROFILE),
+                fg_color="transparent",
+            )
+
+        # ── STUDY ─────────────────────────────────────────────────────────────
+        if state == AppState.STUDY:
+            lib = self._ensure_study_library()
+
+            def on_request_topic(topic: str):
+                self._generate_study_content(requested_topic=topic)
+                # Refresh the current StudyPage in place if it is still active
+                if (
+                    isinstance(self._current_frame, StudyPage)
+                    and self._study_library is not None
+                ):
+                    self._current_frame.refresh_contents(
+                        self._study_library.get_all()
+                    )
+
+            def on_quiz_completed(content_id: str, correct: int, total: int):
+                cycle = (
+                    self._engine.market.cycle if self._engine else 0
+                )
+                lib.record_quiz_result(content_id, correct, cycle)
+                # ask the AI to evaluate mastery after each quiz
+                self._evaluate_mastery(content_id)
+                # Refresh list to reflect updated badges
+                if isinstance(self._current_frame, StudyPage):
+                    self._current_frame.refresh_contents(lib.get_all())
+
+            return StudyPage(
+                master=self,
+                contents=lib.get_all(),
+                on_back=lambda: self._transition(AppState.HUB),
+                on_request_topic=on_request_topic,
+                on_quiz_completed=on_quiz_completed,
                 fg_color="transparent",
             )
 
@@ -274,7 +347,7 @@ class App(ctk.CTk):
                 ),
                 selic_pct=market.get("selic_annual_pct", 0.0),
                 inflation_pct=market.get("inflation_annual_pct", 0.0),
-                on_next=lambda: self._transition(AppState.INICIAL),
+                on_next=lambda: self._transition(AppState.HUB),
                 fg_color="transparent",
             )
 
@@ -289,6 +362,113 @@ class App(ctk.CTk):
         if self._engine is None or self._profile is None:
             return None
         return self._engine.portfolios.get(self._profile.user_id)
+
+    def _ensure_study_library(self) -> StudyLibrary:
+        """Returns (creating if needed) the StudyLibrary for the current profile."""
+        if self._study_library is None:
+            user_id = self._profile.user_id if self._profile else "anonymous"
+            self._study_library = StudyLibrary(user_id=user_id, data_dir=".")
+        return self._study_library
+
+    def _simulator_performance(self) -> dict:
+        """Builds the simulator_performance dict consumed by the AI engine."""
+        scores = self._quest_scores
+        avg = sum(scores) / len(scores) if scores else 0.0
+        return {
+            "avg_score": avg,
+            "completed_quests": len(scores),
+            "main_weakness": "diversificação",   # placeholder — será extraído do debriefing futuramente
+            "last_quest_topics": [],
+        }
+
+    def _generate_study_content(self, requested_topic: str | None = None):
+        """
+        Calls the AI engine to generate a new StudyContent and persists it.
+        Falls back gracefully if the AI engine is not available.
+        """
+        from src.Ai.engine import Engine as AiEngine
+        from src.Ai.bob import Bob
+
+        lib = self._ensure_study_library()
+
+        profile_dict = {}
+        if self._profile:
+            profile_dict = {
+                "name": self._profile.name,
+                "knowledge_level": self._profile.knowledge_level,
+                "risk_profile": self._profile.risk_profile,
+                "goal": self._profile.goal,
+                "monthly_income": self._profile.monthly_income,
+                "monthly_expenses": self._profile.monthly_expenses,
+                "monthly_surplus": self._profile.monthly_surplus,
+                "goal_amount": self._profile.goal_amount,
+                "goal_deadline_months": self._profile.goal_deadline_months,
+            }
+
+        try:
+            api_key = os.environ.get("BOBSHELL_API_KEY", "")
+            bob = Bob(email="", password=api_key)
+            bob.login()
+            ai = AiEngine(bob)
+            raw = ai.generate_study_content(
+                user_profile=profile_dict,
+                simulator_performance=self._simulator_performance(),
+                library_summary=lib.mastery_summary(),
+                requested_topic=requested_topic,
+            )
+            data = json.loads(raw)
+            content = StudyContent(
+                id=str(uuid.uuid4()),
+                topic=data["topic"],
+                source_text=data["source_text"],
+                adapted_text=data["adapted_text"],
+                quiz=[QuizQuestion(**q) for q in data.get("quiz", [])],
+                sim_score_at_creation=self._simulator_performance()["avg_score"],
+                created_cycle=self._engine.market.cycle if self._engine else 0,
+                requested_by_user=requested_topic is not None,
+            )
+            lib.add(content)
+        except Exception as e:
+            print(f"[STUDY] Falha ao gerar conteúdo via IA: {e}")
+
+    def _evaluate_mastery(self, content_id: str):
+        """
+        After a quiz, asks the AI whether the topic has been mastered.
+        Updates the library if mastered=True is returned.
+        """
+        from src.Ai.engine import Engine as AiEngine
+        from src.Ai.bob import Bob
+
+        lib = self._ensure_study_library()
+        content = lib.get_by_id(content_id)
+        if content is None:
+            return
+
+        try:
+            api_key = os.environ.get("BOBSHELL_API_KEY", "")
+            bob = Bob(email="", password=api_key)
+            bob.login()
+            ai = AiEngine(bob)
+            quiz_dicts = [
+                {"cycle": r.cycle, "score": r.score,
+                 "correct": r.correct, "total": r.total}
+                for r in content.quiz_results
+            ]
+            raw = ai.evaluate_study_mastery(
+                topic=content.topic,
+                quiz_results=quiz_dicts,
+                simulator_performance=self._simulator_performance(),
+                knowledge_level=(
+                    self._profile.knowledge_level
+                    if self._profile else "iniciante"
+                ),
+            )
+            data = json.loads(raw)
+            if data.get("mastered"):
+                lib.mark_mastered(content_id)
+                print(f"[STUDY] Tema '{content.topic}' marcado como dominado.")
+        except Exception as e:
+            print(f"[STUDY] Falha ao avaliar domínio via IA: {e}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
