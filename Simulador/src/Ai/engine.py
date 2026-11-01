@@ -400,123 +400,6 @@ Seu debriefing deve obrigatoriamente conter:
 
         return self._bob.send_prompt(prompt)
 
-    def generate_quest(
-        self,
-        quest_type: str,
-        user_profile: dict,
-        learning_context: dict,
-    ) -> str:
-        """
-        Asks Bob to generate a quest for the upcoming cycle.
-
-        Should be called after the previous cycle's debriefing, using the
-        score and observations from that debriefing to seed difficulty and
-        narrative tone.
-
-        Parameters
-        ----------
-        quest_type       : "acumulação" | "sobrevivência" | "evento"
-        user_profile     : dict with the user's financial snapshot, e.g.:
-                             {
-                               "name": str,
-                               "monthly_income": float,
-                               "monthly_expenses": float,
-                               "monthly_surplus": float,
-                               "risk_profile": str,       # "conservador" | "moderado" | "arrojado"
-                               "knowledge_level": str,    # "iniciante" | "intermediário" | "avançado"
-                               "goal": str,
-                               "goal_amount": float,
-                               "goal_deadline_months": int,
-                             }
-        learning_context : dict with the user's progression data, e.g.:
-                             {
-                               "last_score": int,          # 0–100 from previous debriefing
-                               "completed_quests": int,
-                               "main_weakness": str,       # e.g. "diversificação"
-                               "last_quest_type": str,
-                               "unlocked_event": bool,     # True if next quest should be "evento"
-                             }
-
-        Returns the raw text response from Bob (the full quest briefing).
-        """
-        quest_type_rules = {
-            "acumulação":    "O objetivo é acumular o máximo de lucro minimizando riscos. "
-                             "O usuário vence se superar uma meta de rendimento definida na quest.",
-            "sobrevivência": "O objetivo é reduzir perdas ao máximo. "
-                             "O usuário vence se mantiver o patrimônio acima de um limite definido na quest.",
-            "evento":        "Uma situação especial ocorre este mês (ex: aumento de salário, perda de um bem, "
-                             "oportunidade de investimento específico). O usuário deve reagir a este evento "
-                             "com uma decisão financeira concreta. Após a quest, gere conteúdo educativo "
-                             "sobre o tipo de investimento envolvido.",
-        }.get(quest_type.lower(), quest_type)
-
-        # --- User profile block ------------------------------------------
-        name             = user_profile.get("name", "Usuário")
-        monthly_income   = user_profile.get("monthly_income", 0.0)
-        monthly_expenses = user_profile.get("monthly_expenses", 0.0)
-        monthly_surplus  = user_profile.get("monthly_surplus", monthly_income - monthly_expenses)
-        risk_profile     = user_profile.get("risk_profile", "moderado")
-        knowledge_level  = user_profile.get("knowledge_level", "iniciante")
-        goal             = user_profile.get("goal", "não definido")
-        goal_amount      = user_profile.get("goal_amount", 0.0)
-        goal_deadline    = user_profile.get("goal_deadline_months", 0)
-
-        profile_block = f"""\
-Usuário       : {name}
-Renda mensal  : R$ {monthly_income:.2f}
-Gastos fixos  : R$ {monthly_expenses:.2f}
-Sobra mensal  : R$ {monthly_surplus:.2f}
-Perfil        : {risk_profile}  |  Nível: {knowledge_level}
-Meta          : {goal}  (R$ {goal_amount:.2f} em {goal_deadline} meses)"""
-
-        # --- Learning context block --------------------------------------
-        last_score       = learning_context.get("last_score")
-        completed_quests = learning_context.get("completed_quests", 0)
-        main_weakness    = learning_context.get("main_weakness", "não identificada")
-        last_quest_type  = learning_context.get("last_quest_type", "nenhuma")
-        unlocked_event   = learning_context.get("unlocked_event", False)
-
-        score_line = f"Pontuação anterior : {last_score}/100" if last_score is not None else "Pontuação anterior : (primeira quest)"
-
-        learning_block = f"""\
-{score_line}
-Quests concluídas  : {completed_quests}
-Última quest       : {last_quest_type}
-Principal fraqueza : {main_weakness}
-Evento desbloqueado: {"sim" if unlocked_event else "não"}"""
-
-        prompt = f"""=== GERAÇÃO DE QUEST — TIPO: {quest_type.upper()} ===
-
-REGRAS DO TIPO DE QUEST:
-{quest_type_rules}
-
-PERFIL DO USUÁRIO:
-{profile_block}
-
-CONTEXTO DE APRENDIZADO:
-{learning_block}
-
----
-Gere a quest deste ciclo seguindo obrigatoriamente o formato abaixo.
-Calibre a dificuldade com base na pontuação anterior (pontuação alta → mais desafiador; pontuação baixa → mais acessível).
-Use a principal fraqueza do usuário para direcionar o foco educativo da quest.
-
-FORMATO OBRIGATÓRIO DA QUEST:
-
-TÍTULO: (título narrativo curto e imersivo)
-
-CONTEXTO: (2–3 frases descrevendo o cenário do mês com tom narrativo — o que aconteceu na vida financeira do usuário)
-
-OBJETIVO: (uma frase clara e mensurável — o usuário sabe exatamente o que precisa fazer para vencer)
-
-CONDIÇÃO DE VITÓRIA: (critério objetivo, em R$ ou %, que será verificado ao final do ciclo)
-
-CONDIÇÃO DE DERROTA: (o que configura falha — seja explícito)
-
-DICA INICIAL: (uma orientação educativa curta, sem entregar a solução, focada na fraqueza principal do usuário)"""
-
-        return self._bob.send_prompt(prompt)
-
     def generate_study_content(
         self,
         user_profile: dict,
@@ -728,6 +611,292 @@ Retorne SOMENTE o JSON abaixo, sem texto adicional:
   "mastered": <true ou false>,
   "reason": "<explicação em 1-2 frases do porquê dominado ou não>",
   "recommendation": "<o que o usuário deve estudar ou praticar a seguir>"
+}}"""
+
+        return self._bob.send_prompt(prompt)
+
+    def analyze_quest_performance(
+        self,
+        quest: dict,
+        actions: list[dict],
+        portfolio_snapshot: dict,
+        current_profile: dict,
+        inference_history: list[dict],
+    ) -> str:
+        """
+        Evaluates the user's quest performance and infers whether their
+        behavioural profile (risk tolerance, knowledge level) should be updated.
+
+        Must be called after the quest cycle closes, with the full list of
+        actions taken and the final portfolio snapshot.
+
+        Parameters
+        ----------
+        quest              : the active quest dict, e.g.:
+                             {
+                               "type": str,          # "acumulação"|"sobrevivência"|"evento"
+                               "title": str,
+                               "objective": str,
+                               "victory_condition": str,
+                               "defeat_condition": str,
+                               "objective_achieved": bool,
+                               "cycles_played": int,
+                             }
+        actions            : list of Portfolio.transaction_log dicts for this quest
+        portfolio_snapshot : output of SimulatorEngine.snapshot()
+        current_profile    : {
+                               "risk_profile": str,
+                               "knowledge_level": str,
+                               "goal": str,
+                               "monthly_surplus": float,
+                             }
+        inference_history  : list of past ProfileInferenceEntry dicts (most recent last),
+                             used to give the agent continuity across quests
+
+        Returns the raw text response from Bob. Expected to be valid JSON:
+
+        {
+          "score": int,                  // 0–100
+          "main_weakness": str,          // e.g. "diversificação", "liquidez"
+          "inferred_risk": str,          // "conservador"|"moderado"|"arrojado"
+          "inferred_level": str,         // "iniciante"|"intermediário"|"avançado"
+          "reasoning": str,              // 2-3 sentences justifying the inference
+          "summary": str,                // short feedback shown to user on debriefing
+          "quest_tip": str               // one educational tip for next quest
+        }
+        """
+        # ── Quest context ────────────────────────────────────────────────────
+        q_type      = quest.get("type", "acumulação")
+        q_title     = quest.get("title", "Quest")
+        q_objective = quest.get("objective", "")
+        q_victory   = quest.get("victory_condition", "")
+        q_defeat    = quest.get("defeat_condition", "")
+        q_achieved  = quest.get("objective_achieved", False)
+        q_cycles    = quest.get("cycles_played", 1)
+
+        result_label = "✅ OBJETIVO CUMPRIDO" if q_achieved else "❌ OBJETIVO NÃO CUMPRIDO"
+
+        # ── Actions summary ──────────────────────────────────────────────────
+        _labels = {
+            "deposit":      "Depósito",
+            "withdraw":     "Saque",
+            "buy_fixed":    "Compra Renda Fixa",
+            "redeem_fixed": "Resgate Renda Fixa",
+            "buy_stock":    "Compra de Ação",
+            "sell_stock":   "Venda de Ação",
+        }
+        action_lines = []
+        for i, a in enumerate(actions, 1):
+            lbl    = _labels.get(a.get("action", ""), a.get("action", ""))
+            amount = a.get("amount", 0.0)
+            extra  = ""
+            if a.get("ticker"):
+                extra += f" | ativo: {a['ticker']}"
+            if a.get("shares") is not None:
+                extra += f" | {a['shares']:.4f} cotas"
+            if a.get("price") is not None:
+                extra += f" @ R$ {a['price']:.2f}"
+            action_lines.append(f"  {i:>2}. [{lbl}]  R$ {amount:.2f}{extra}")
+        actions_block = "\n".join(action_lines) or "  (nenhuma ação realizada)"
+
+        # ── Portfolio final ──────────────────────────────────────────────────
+        nw     = portfolio_snapshot.get("net_worth", 0.0)
+        cash   = portfolio_snapshot.get("cash", 0.0)
+        alloc  = portfolio_snapshot.get("allocation", {})
+        ef     = portfolio_snapshot.get("emergency_fund", {})
+        goal_p = portfolio_snapshot.get("goal_progress", {})
+        market = portfolio_snapshot.get("market", {})
+
+        portfolio_block = (
+            f"  Patrimônio líquido : R$ {nw:.2f}\n"
+            f"  Caixa              : R$ {cash:.2f}\n"
+            f"  Alocação — Caixa: {alloc.get('cash_pct', 0):.1f}%  "
+            f"| Renda Fixa: {alloc.get('fixed_pct', 0):.1f}%  "
+            f"| Ações: {alloc.get('stocks_pct', 0):.1f}%\n"
+            f"  Reserva de emergência: {ef.get('completion_pct', 0):.0f}% da meta\n"
+            f"  Meta '{goal_p.get('goal', '?')}': {goal_p.get('completion_pct', 0):.1f}%\n"
+            f"  SELIC: {market.get('selic_annual_pct', '?')}% a.a."
+        )
+
+        # ── Current profile ──────────────────────────────────────────────────
+        c_risk    = current_profile.get("risk_profile", "moderado")
+        c_level   = current_profile.get("knowledge_level", "iniciante")
+        c_goal    = current_profile.get("goal", "não definido")
+        c_surplus = current_profile.get("monthly_surplus", 0.0)
+
+        # ── Inference history ────────────────────────────────────────────────
+        if inference_history:
+            history_lines = []
+            for h in inference_history[-5:]:   # últimas 5 inferências
+                applied = "aplicada" if h.get("applied") else "não aplicada"
+                history_lines.append(
+                    f"  [ciclo {h.get('cycle', '?')}] score {h.get('score', '?')}/100  "
+                    f"risco: {h.get('inferred_risk', '?')}  "
+                    f"nível: {h.get('inferred_level', '?')}  "
+                    f"fraqueza: {h.get('main_weakness', '?')}  [{applied}]"
+                )
+            history_block = "\n".join(history_lines)
+        else:
+            history_block = "  (primeira quest — sem histórico anterior)"
+
+        prompt = f"""=== ANÁLISE DE DESEMPENHO DA QUEST ===
+
+QUEST: {q_title}
+TIPO: {q_type}
+OBJETIVO: {q_objective}
+CONDIÇÃO DE VITÓRIA: {q_victory}
+CONDIÇÃO DE DERROTA: {q_defeat}
+DURAÇÃO: {q_cycles} ciclo(s)
+RESULTADO: {result_label}
+
+AÇÕES DO USUÁRIO NESTA QUEST:
+{actions_block}
+
+ESTADO FINAL DO PORTFÓLIO:
+{portfolio_block}
+
+PERFIL DECLARADO ATUAL:
+  Perfil de risco     : {c_risk}
+  Nível de conhecimento: {c_level}
+  Objetivo            : {c_goal}
+  Sobra mensal        : R$ {c_surplus:.2f}
+
+HISTÓRICO DE INFERÊNCIAS ANTERIORES:
+{history_block}
+
+---
+Analise o comportamento real do usuário nas ações acima e compare com o seu perfil declarado.
+Considere:
+  - Como o usuário alocou os recursos (diversificação, proporção renda fixa/variável)
+  - Se respeitou a reserva de emergência
+  - Se agiu de forma coerente com o perfil declarado ou demonstrou comportamento diferente
+  - Evolução em relação às inferências anteriores (se houver)
+
+Retorne SOMENTE o JSON abaixo, sem texto adicional:
+
+{{
+  "score": <0-100>,
+  "main_weakness": "<fraqueza principal em 1-3 palavras, ex: diversificacao, gestao_de_risco, liquidez>",
+  "inferred_risk": "<conservador|moderado|arrojado>",
+  "inferred_level": "<iniciante|intermediario|avancado>",
+  "reasoning": "<2-3 frases justificando a inferência com base no comportamento observado>",
+  "summary": "<2-3 frases de feedback direto ao usuário sobre o que fez bem e o que pode melhorar>",
+  "quest_tip": "<1 dica educativa curta e acionável para a próxima quest>"
+}}"""
+
+        return self._bob.send_prompt(prompt)
+
+    def generate_quest(
+        self,
+        quest_type: str,
+        user_profile: dict,
+        learning_context: dict,
+    ) -> str:
+        """
+        Asks Bob to generate a quest for the upcoming cycle.
+
+        Parameters
+        ----------
+        quest_type       : "acumulação" | "sobrevivência" | "evento"
+        user_profile     : {
+                             "name": str,
+                             "monthly_income": float,
+                             "monthly_expenses": float,
+                             "monthly_surplus": float,
+                             "risk_profile": str,
+                             "knowledge_level": str,
+                             "goal": str,
+                             "goal_amount": float,
+                             "goal_deadline_months": int,
+                           }
+        learning_context : {
+                             "last_score": int | None,
+                             "completed_quests": int,
+                             "main_weakness": str,
+                             "last_quest_type": str,
+                             "inferred_risk": str,
+                             "inferred_level": str,
+                           }
+
+        Returns the raw text response from Bob. Expected to be valid JSON:
+
+        {
+          "title": str,
+          "context": str,
+          "objective": str,
+          "victory_condition": str,
+          "defeat_condition": str,
+          "initial_tip": str
+        }
+        """
+        quest_type_rules = {
+            "acumulação":    "O objetivo é acumular o máximo de lucro minimizando riscos. "
+                             "O usuário vence se superar uma meta de rendimento definida na quest.",
+            "sobrevivência": "O objetivo é reduzir perdas ao máximo. "
+                             "O usuário vence se mantiver o patrimônio acima de um limite definido na quest.",
+            "evento":        "Uma situação especial ocorre este mês (ex: aumento de salário, perda de um bem, "
+                             "oportunidade de investimento específico). O usuário deve reagir a este evento "
+                             "com uma decisão financeira concreta.",
+        }.get(quest_type.lower(), quest_type)
+
+        name             = user_profile.get("name", "Usuário")
+        monthly_income   = user_profile.get("monthly_income", 0.0)
+        monthly_expenses = user_profile.get("monthly_expenses", 0.0)
+        monthly_surplus  = user_profile.get("monthly_surplus", monthly_income - monthly_expenses)
+        goal             = user_profile.get("goal", "não definido")
+        goal_amount      = user_profile.get("goal_amount", 0.0)
+        goal_deadline    = user_profile.get("goal_deadline_months", 0)
+
+        last_score       = learning_context.get("last_score")
+        completed_quests = learning_context.get("completed_quests", 0)
+        main_weakness    = learning_context.get("main_weakness", "não identificada")
+        last_quest_type  = learning_context.get("last_quest_type", "nenhuma")
+        inferred_risk    = learning_context.get("inferred_risk", user_profile.get("risk_profile", "moderado"))
+        inferred_level   = learning_context.get("inferred_level", user_profile.get("knowledge_level", "iniciante"))
+
+        score_line = f"Pontuação na última quest: {last_score}/100" if last_score is not None else "Pontuação: (primeira quest)"
+        difficulty_hint = (
+            "Aumente a dificuldade — o usuário está se saindo bem."
+            if last_score is not None and last_score >= 75
+            else "Mantenha dificuldade acessível — o usuário ainda está consolidando o aprendizado."
+            if last_score is not None and last_score < 50
+            else "Dificuldade moderada."
+        )
+
+        prompt = f"""=== GERAÇÃO DE QUEST — TIPO: {quest_type.upper()} ===
+
+REGRAS DO TIPO:
+{quest_type_rules}
+
+PERFIL DO USUÁRIO (INFERIDO PELO AGENTE):
+  Perfil de risco     : {inferred_risk}
+  Nível de conhecimento: {inferred_level}
+  Nome                : {name}
+  Renda mensal        : R$ {monthly_income:.2f}
+  Gastos fixos        : R$ {monthly_expenses:.2f}
+  Sobra mensal        : R$ {monthly_surplus:.2f}
+  Meta                : {goal}  (R$ {goal_amount:.2f} em {goal_deadline} meses)
+
+CONTEXTO DE APRENDIZADO:
+  {score_line}
+  Quests concluídas   : {completed_quests}
+  Última quest        : {last_quest_type}
+  Principal fraqueza  : {main_weakness}
+  Orientação de dificuldade: {difficulty_hint}
+
+---
+Gere a quest deste ciclo usando o perfil inferido (não o declarado) como base para calibrar dificuldade e foco educativo.
+Use a fraqueza principal para direcionar o tema educativo da quest.
+
+Retorne SOMENTE o JSON abaixo, sem texto adicional:
+
+{{
+  "title": "<título narrativo curto e imersivo>",
+  "context": "<2-3 frases de cenário com tom narrativo>",
+  "objective": "<uma frase clara e mensurável>",
+  "victory_condition": "<critério objetivo em R$ ou %>",
+  "defeat_condition": "<o que configura falha — seja explícito>",
+  "initial_tip": "<1 dica educativa curta focada na fraqueza do usuário>"
 }}"""
 
         return self._bob.send_prompt(prompt)

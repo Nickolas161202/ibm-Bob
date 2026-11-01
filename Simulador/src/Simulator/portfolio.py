@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 import uuid
+import datetime
 
 from .market import MarketState
 from .fixed_income import (
@@ -24,6 +25,112 @@ from .fixed_income import (
     FixedIncomeType,
 )
 from .variable_income import StockPosition, StockMarketState, STOCKS
+
+
+# ---------------------------------------------------------------------------
+# Inferência de perfil — atualizada pelo agente após cada quest
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ProfileInferenceEntry:
+    """
+    Registro de uma única inferência feita pelo agente após uma quest.
+
+    Fields
+    ------
+    cycle           : ciclo do simulador em que a inferência ocorreu
+    score           : pontuação atribuída à quest (0–100)
+    main_weakness   : fraqueza principal detectada (ex: "diversificação")
+    inferred_risk   : perfil de risco inferido ("conservador"|"moderado"|"arrojado")
+    inferred_level  : nível de conhecimento inferido ("iniciante"|"intermediário"|"avançado")
+    reasoning       : texto explicativo do agente
+    applied         : True se o usuário confirmou (ou a atualização foi automática)
+    confirmed_by_user : True se o usuário confirmou explicitamente
+    timestamp       : ISO datetime string
+    """
+    cycle: int
+    score: int
+    main_weakness: str
+    inferred_risk: str
+    inferred_level: str
+    reasoning: str
+    applied: bool = False
+    confirmed_by_user: bool = False
+    timestamp: str = field(
+        default_factory=lambda: datetime.datetime.now().isoformat(timespec="seconds")
+    )
+
+
+@dataclass
+class ProfileInferenceState:
+    """
+    Estado vivo das inferências do agente para um usuário.
+    Mantém o histórico completo e decide quando pedir confirmação.
+
+    Regras de confirmação (qualquer uma dispara):
+      - A mudança de risco ou nível é mais de um degrau
+        (ex: conservador → arrojado)
+      - Há ≥ SILENT_UPDATES_LIMIT atualizações automáticas desde a
+        última confirmação explícita do usuário
+
+    Degraus válidos:
+      risco: conservador < moderado < arrojado
+      nível: iniciante < intermediário < avançado
+    """
+
+    SILENT_UPDATES_LIMIT: int = 3   # atualizações automáticas sem perguntar
+
+    history: list[ProfileInferenceEntry] = field(default_factory=list)
+    silent_updates_since_last_confirmation: int = 0
+
+    _RISK_ORDER   = ["conservador", "moderado", "arrojado"]
+    _LEVEL_ORDER  = ["iniciante", "intermediário", "avançado"]
+
+    def record(self, entry: ProfileInferenceEntry):
+        self.history.append(entry)
+
+    def needs_confirmation(
+        self,
+        new_risk: str,
+        new_level: str,
+        current_risk: str,
+        current_level: str,
+    ) -> bool:
+        """
+        Returns True if the user must be asked before applying the update.
+        """
+        risk_delta  = self._delta(new_risk,  current_risk,  self._RISK_ORDER)
+        level_delta = self._delta(new_level, current_level, self._LEVEL_ORDER)
+        drastic = (risk_delta > 1) or (level_delta > 1)
+        too_many_silent = (
+            self.silent_updates_since_last_confirmation >= self.SILENT_UPDATES_LIMIT
+        )
+        return drastic or too_many_silent
+
+    def mark_confirmed(self):
+        self.silent_updates_since_last_confirmation = 0
+
+    def mark_silent_update(self):
+        self.silent_updates_since_last_confirmation += 1
+
+    @staticmethod
+    def _delta(new: str, current: str, order: list[str]) -> int:
+        try:
+            return abs(order.index(new) - order.index(current))
+        except ValueError:
+            return 0
+
+    @property
+    def last_score(self) -> Optional[int]:
+        return self.history[-1].score if self.history else None
+
+    @property
+    def main_weakness(self) -> str:
+        return self.history[-1].main_weakness if self.history else "não identificada"
+
+    @property
+    def completed_quests(self) -> int:
+        return len(self.history)
 
 
 # ---------------------------------------------------------------------------

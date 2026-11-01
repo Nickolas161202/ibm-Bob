@@ -67,6 +67,9 @@ from src.Simulator.fixed_income import FixedIncomeType, PRODUCTS
 # ── study library ─────────────────────────────────────────────────────────────
 from src.Study.library import StudyLibrary, StudyContent, QuizQuestion
 
+# ── profile inference ─────────────────────────────────────────────────────────
+from src.Simulator.portfolio import ProfileInferenceState, ProfileInferenceEntry
+
 # ── interface pages ───────────────────────────────────────────────────────────
 from src.Interfaces.initial import InitialPage
 from src.Interfaces.createProfile import CreateProfilePage
@@ -78,6 +81,7 @@ from src.Interfaces.debriefing import DebriefingPage
 from src.Interfaces.endOfMonth import EndOfMonthPage
 from src.Interfaces.hub import HubPage
 from src.Interfaces.studyPage import StudyPage
+from src.Interfaces.profileConfirm import ProfileConfirmDialog
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -263,13 +267,13 @@ class App(ctk.CTk):
         # tracks quest scores for mastery evaluation
         self._quest_scores: list[int] = []
 
-        if self._profile is not None:
-            self._engine = SimulatorEngine()
-            self._engine.create_portfolio(self._profile, initial_cash=self._profile.monthly_surplus)
-
-        # ── inference state (tracks AI-inferred profile updates) ─────────────
-        self._inference_state = _InferenceState()
+        # ── profile inference state ───────────────────────────────────────────
+        self._inference_state: ProfileInferenceState = ProfileInferenceState()
+        # active quest dict (title, type, objective, …) — populated by QUEST_GENERATED
         self._active_quest: dict = {}
+        # snapshot of portfolio taken at the START of a quest (baseline for evaluation)
+        self._quest_start_snapshot: dict = {}
+        # transaction log slice taken at quest start (to send only quest actions)
         self._quest_start_log_len: int = 0
 
         # ── current frame reference (for clean destroy) ───────────────────────
@@ -380,19 +384,25 @@ class App(ctk.CTk):
 
         # ── QUEST_GENERATED ───────────────────────────────────────────────────
         if state == AppState.QUEST_GENERATED:
+            # Generate the quest via AI (falls back to hardcoded on failure)
+            quest_data = self._generate_quest()
+
             def on_start():
-                # Record net worth at quest start for completion tracking
+                # Record the portfolio baseline so we can evaluate later
                 portfolio = self._current_portfolio()
                 if self._engine and portfolio:
-                    snap = self._engine.snapshot(portfolio)
-                    self._quest_start_net_worth = snap.get("net_worth", 0.0)
+                    self._quest_start_snapshot = self._engine.snapshot(portfolio)
+                    self._quest_start_log_len  = len(portfolio.transaction_log)
                 self._transition(AppState.SIMULATOR_MAIN)
 
             return QuestGeneratedPage(
                 master=self,
-                quest_title=self._quest_title,
-                quest_description=self._quest_description,
-                quest_objective=self._quest_objective,
+                quest_title=quest_data.get("title", "Nova Missão"),
+                quest_description=(
+                    quest_data.get("context", "")
+                    + "\n\n💡  " + quest_data.get("initial_tip", "")
+                ).strip(),
+                quest_objective="🎯  " + quest_data.get("objective", ""),
                 on_start=on_start,
                 fg_color="transparent",
             )
@@ -530,14 +540,21 @@ class App(ctk.CTk):
             prev_nw = history[-2] if len(history) >= 2 else history[0] if history else nw
             change = nw - prev_nw
 
-            # Quest completion check
-            quest_completed = self._check_quest_completed(snap)
-
-            # AI debriefing feedback (best-effort)
-            agent_feedback = self._request_ai_debriefing(
-                snap=snap,
-                quest_completed=quest_completed,
+            # ── Run post-quest AI evaluation (async-style: best-effort) ───────
+            ai_result = self._evaluate_quest(portfolio, snap)
+            feedback  = ai_result.get(
+                "summary",
+                "Continue investindo com disciplina! "
+                "Mantenha sua reserva de emergência antes de buscar maior retorno.",
             )
+            quest_completed = self._active_quest.get("objective_achieved", False)
+
+            def on_continue():
+                # Show profile update confirmation if needed, then advance
+                self._maybe_confirm_profile_update(
+                    ai_result=ai_result,
+                    on_done=lambda: self._transition(AppState.END_MONTH),
+                )
 
             return DebriefingPage(
                 master=self,
@@ -548,9 +565,9 @@ class App(ctk.CTk):
                 fixed_pct=alloc.get("fixed_pct", 0.0),
                 stocks_pct=alloc.get("stocks_pct", 0.0),
                 cycles_played=snap.get("cycle", 1),
-                agent_feedback=agent_feedback,
+                agent_feedback=feedback,
                 quest_completed=quest_completed,
-                on_continue=lambda: self._transition(AppState.END_MONTH),
+                on_continue=on_continue,
                 fg_color="transparent",
             )
 
@@ -1130,7 +1147,6 @@ class App(ctk.CTk):
         )
 
         def apply_update():
-            assert self._profile is not None
             self._profile.risk_profile    = new_risk
             self._profile.knowledge_level = new_level
             # mark last entry as applied
