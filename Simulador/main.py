@@ -21,7 +21,7 @@ Diagrama de estados (states_ibm.json):
                               └──────┬───────┘  │  └──────────────────┘
                                      ▼          │ Estudos (a implementar)
                            ┌──────────────────────┐
-                  ┌───────►│  Simulador Principal  │◄──────┐
+                  ┌───────►│ Simulador Principal  │◄──────-┐
                   │        └──┬───────────────┬───┘        │
                   │  back     │ Low Risk      │ High Risk  │ back
                   │           ▼               ▼            │
@@ -45,9 +45,12 @@ Diagrama de estados (states_ibm.json):
 
 from __future__ import annotations
 
+import json
 import os
 import sys
+from dataclasses import asdict
 from enum import Enum, auto
+from pathlib import Path
 from typing import Optional
 
 import customtkinter as ctk
@@ -95,6 +98,32 @@ class AppState(Enum):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Profile persistence
+# ─────────────────────────────────────────────────────────────────────────────
+
+_PROFILES_DIR = Path(__file__).parent / "data" / "profiles"
+
+
+def _save_profile(profile: InvestorProfile) -> Path:
+    """Serialise *profile* to ``data/profiles/<user_id>.json`` and return the path."""
+    _PROFILES_DIR.mkdir(parents=True, exist_ok=True)
+    path = _PROFILES_DIR / f"{profile.user_id}.json"
+    path.write_text(json.dumps(asdict(profile), indent=2, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def _load_latest_profile() -> Optional[InvestorProfile]:
+    """Return the most recently saved InvestorProfile, or None if none exist."""
+    if not _PROFILES_DIR.exists():
+        return None
+    files = sorted(_PROFILES_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if not files:
+        return None
+    data = json.loads(files[0].read_text(encoding="utf-8"))
+    return InvestorProfile(**data)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Application — state machine + frame management
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -114,13 +143,17 @@ class App(ctk.CTk):
 
         # ── simulator state ───────────────────────────────────────────────────
         self._engine: Optional[SimulatorEngine] = None
-        self._profile: Optional[InvestorProfile] = None
+        self._profile: Optional[InvestorProfile] = _load_latest_profile()
         self._last_cycle_result = None   # CycleResult from advance_cycle()
 
         # ── study library (one instance per profile, loaded lazily) ───────────
         self._study_library: Optional[StudyLibrary] = None
         # tracks quest scores for mastery evaluation
         self._quest_scores: list[int] = []
+
+        if self._profile is not None:
+            self._engine = SimulatorEngine()
+            self._engine.create_portfolio(self._profile, initial_cash=self._profile.monthly_surplus)
 
         # ── current frame reference (for clean destroy) ───────────────────────
         self._current_frame: Optional[ctk.CTkFrame] = None
@@ -167,6 +200,7 @@ class App(ctk.CTk):
                 self._profile = profile
                 self._engine = SimulatorEngine()
                 self._engine.create_portfolio(profile, initial_cash=profile.monthly_surplus)
+                _save_profile(profile)
                 self._transition(AppState.HUB)
 
             return CreateProfilePage(
