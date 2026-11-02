@@ -3,8 +3,13 @@ highRiskInvestments.py
 ----------------------
 Tela de investimentos de alto risco (Renda Variável / Ações).
 
-Lista os tickers disponíveis no mercado com preço e tendência atual,
-e permite comprar ou vender ações.
+Exibe os tickers disponíveis com preço e tendência reais do engine,
+as posições já detidas pelo jogador (com P&L), e permite comprar ou vender.
+
+Callbacks:
+  on_buy(ticker: str, amount_brl: float)   → comprar pelo valor em R$
+  on_sell(ticker: str, shares: float)      → vender quantidade de cotas
+  on_back()                                → voltar
 """
 
 from __future__ import annotations
@@ -14,21 +19,12 @@ from typing import Callable
 import customtkinter as ctk
 
 
-# Stocks placeholder — serão substituídos pelos dados reais do engine
-_PLACEHOLDER_STOCKS = [
-    {"ticker": "VALE3", "name": "Vale S.A.", "price": 72.40, "trend": "alta"},
-    {"ticker": "PETR4", "name": "Petrobras", "price": 38.15, "trend": "queda"},
-    {"ticker": "ITUB4", "name": "Itaú Unibanco", "price": 28.90, "trend": "estável"},
-    {"ticker": "BBDC4", "name": "Bradesco", "price": 14.55, "trend": "alta"},
-    {"ticker": "MGLU3", "name": "Magazine Luiza", "price": 9.80, "trend": "queda"},
-]
-
 _TREND_COLOR = {
-    "alta": "#4caf50",
-    "queda": "#e05c5c",
-    "estável": "gray",
+    "📈 Alta":      "#4caf50",
+    "📉 Baixa":     "#e05c5c",
+    "➡️  Estável":  "gray",
+    "🌀 Caótico":   "#f5a623",
 }
-_TREND_ICON = {"alta": "▲", "queda": "▼", "estável": "●"}
 
 
 class HighRiskInvestmentsPage(ctk.CTkFrame):
@@ -38,6 +34,8 @@ class HighRiskInvestmentsPage(ctk.CTkFrame):
         self,
         master,
         stocks: list[dict] | None = None,
+        portfolio_positions: list[dict] | None = None,
+        cash: float = 0.0,
         on_buy: Callable[[str, float], None] | None = None,
         on_sell: Callable[[str, float], None] | None = None,
         on_back: Callable | None = None,
@@ -45,37 +43,57 @@ class HighRiskInvestmentsPage(ctk.CTkFrame):
     ):
         """
         Args:
-            master:   Widget pai.
-            stocks:   Lista de stocks (dicts com ticker, name, price, trend).
-            on_buy:   Callback(ticker, amount_brl) ao comprar.
-            on_sell:  Callback(ticker, shares) ao vender.
-            on_back:  Callback para voltar.
+            master:               Widget pai.
+            stocks:               Lista de dicts do engine (market_snapshot → stocks):
+                                    ticker (str)
+                                    name (str)
+                                    sector (str)
+                                    price (float)
+                                    change_pct (float)   – variação no último ciclo
+                                    trend (str)          – Trend.value
+                                    cycles_in_trend (int)
+            portfolio_positions:  Lista de dicts do snapshot do portfólio
+                                  (full_snapshot → stock_positions), cada um com:
+                                    ticker (str)
+                                    shares (float)
+                                    avg_purchase_price (float)
+                                    current_price (float)
+                                    current_value (float)
+                                    unrealized_pnl (float)
+                                    unrealized_pnl_pct (float)
+            cash:                 Saldo disponível em caixa.
+            on_buy:               Callback(ticker, amount_brl).
+            on_sell:              Callback(ticker, shares).
+            on_back:              Callback para voltar.
         """
         super().__init__(master, **kwargs)
-        self._stocks = stocks or _PLACEHOLDER_STOCKS
+        self._stocks = stocks or []
+        self._portfolio_positions = portfolio_positions or []
+        self._cash = cash
         self._on_buy = on_buy or (lambda t, a: None)
         self._on_sell = on_sell or (lambda t, s: None)
         self._on_back = on_back or (lambda: None)
         self._selected_ticker: str | None = None
+        self._mode = ctk.StringVar(value="buy")   # "buy" | "sell"
         self._error_text = ctk.StringVar(value="")
         self._build()
+
+    # ── Build ─────────────────────────────────────────────────────────────────
 
     def _build(self):
         self.grid_columnconfigure(0, weight=1)
 
         # ── Cabeçalho ────────────────────────────────────────────────────────
         header = ctk.CTkFrame(self, fg_color="transparent")
-        header.grid(row=0, column=0, padx=40, pady=(36, 0), sticky="ew")
+        header.grid(row=0, column=0, padx=40, pady=(28, 0), sticky="ew")
         header.grid_columnconfigure(1, weight=1)
 
         ctk.CTkButton(
             header,
             text="←",
-            width=36,
-            height=36,
+            width=36, height=36,
             corner_radius=8,
-            fg_color="gray25",
-            hover_color="gray30",
+            fg_color="gray25", hover_color="gray30",
             command=self._on_back,
         ).grid(row=0, column=0, padx=(0, 12))
 
@@ -87,47 +105,94 @@ class HighRiskInvestmentsPage(ctk.CTkFrame):
         ).grid(row=0, column=1, sticky="w")
 
         ctk.CTkLabel(
+            header,
+            text=f"💵  Disponível: R$ {self._cash:,.2f}",
+            font=ctk.CTkFont(size=13),
+            text_color="#4caf50",
+            anchor="e",
+        ).grid(row=0, column=2, sticky="e")
+
+        # ── Tabela de ações do mercado ────────────────────────────────────────
+        ctk.CTkLabel(
             self,
-            text="Selecione uma ação e informe o valor (compra) ou qtd. de cotas (venda)",
+            text="Mercado — selecione uma ação",
             font=ctk.CTkFont(size=13),
             text_color="gray",
-        ).grid(row=1, column=0, padx=40, pady=(4, 20))
+        ).grid(row=1, column=0, padx=40, pady=(14, 6), sticky="w")
 
-        # ── Tabela de ações ──────────────────────────────────────────────────
-        scroll = ctk.CTkScrollableFrame(self, height=200, corner_radius=10)
-        scroll.grid(row=2, column=0, padx=40, pady=0, sticky="ew")
-        scroll.grid_columnconfigure(0, weight=1)
+        scroll_mkt = ctk.CTkScrollableFrame(self, height=160, corner_radius=10)
+        scroll_mkt.grid(row=2, column=0, padx=40, pady=0, sticky="ew")
+        scroll_mkt.grid_columnconfigure(0, weight=1)
 
         self._stock_buttons: list[ctk.CTkButton] = []
-        for i, stock in enumerate(self._stocks):
-            icon = _TREND_ICON.get(stock["trend"], "●")
-            btn = ctk.CTkButton(
-                scroll,
-                text=(
-                    f"{stock['ticker']}  —  {stock['name']}"
-                    f"    R$ {stock['price']:,.2f}    {icon} {stock['trend'].capitalize()}"
-                ),
-                font=ctk.CTkFont(size=12),
-                height=40,
-                corner_radius=8,
-                fg_color="gray20",
-                hover_color="gray30",
-                anchor="w",
-                command=lambda t=stock["ticker"]: self._select_ticker(t),
-            )
-            btn.grid(row=i, column=0, pady=4, sticky="ew")
-            self._stock_buttons.append(btn)
+        if self._stocks:
+            for i, stock in enumerate(self._stocks):
+                chg = stock.get("change_pct", 0.0)
+                chg_sign = "+" if chg >= 0 else ""
+                trend_val = stock.get("trend", "➡️  Estável")
+                btn = ctk.CTkButton(
+                    scroll_mkt,
+                    text=(
+                        f"{stock['ticker']:<7}  {stock.get('name', ''):<24}"
+                        f"  R$ {stock['price']:>8.2f}"
+                        f"  {chg_sign}{chg:.1f}%"
+                        f"   {trend_val}"
+                    ),
+                    font=ctk.CTkFont(size=12, family="Courier"),
+                    height=40,
+                    corner_radius=8,
+                    fg_color="gray20",
+                    hover_color="gray30",
+                    anchor="w",
+                    command=lambda t=stock["ticker"]: self._select_ticker(t),
+                )
+                btn.grid(row=i, column=0, pady=3, sticky="ew")
+                self._stock_buttons.append(btn)
+        else:
+            ctk.CTkLabel(
+                scroll_mkt, text="Nenhuma ação disponível.", text_color="gray"
+            ).grid(row=0, column=0, pady=12)
 
-        # ── Input de valor/quantidade ────────────────────────────────────────
-        input_frame = ctk.CTkFrame(self, fg_color="transparent")
-        input_frame.grid(row=3, column=0, padx=40, pady=(20, 0), sticky="ew")
-        input_frame.grid_columnconfigure(1, weight=1)
+        # ── Modo compra / venda + input ───────────────────────────────────────
+        action_frame = ctk.CTkFrame(self, fg_color="transparent")
+        action_frame.grid(row=3, column=0, padx=40, pady=(14, 0), sticky="ew")
+        action_frame.grid_columnconfigure(2, weight=1)
 
         ctk.CTkLabel(
-            input_frame,
-            text="Valor / Qtd.",
+            action_frame,
+            text="Operação:",
             font=ctk.CTkFont(size=13, weight="bold"),
-        ).grid(row=0, column=0, padx=(0, 12))
+        ).grid(row=0, column=0, padx=(0, 8))
+
+        ctk.CTkRadioButton(
+            action_frame,
+            text="Comprar (R$)",
+            variable=self._mode,
+            value="buy",
+            font=ctk.CTkFont(size=13),
+            command=self._update_hint,
+        ).grid(row=0, column=1, padx=(0, 16))
+
+        ctk.CTkRadioButton(
+            action_frame,
+            text="Vender (cotas)",
+            variable=self._mode,
+            value="sell",
+            font=ctk.CTkFont(size=13),
+            command=self._update_hint,
+        ).grid(row=0, column=2, sticky="w")
+
+        input_frame = ctk.CTkFrame(self, fg_color="transparent")
+        input_frame.grid(row=4, column=0, padx=40, pady=(10, 0), sticky="ew")
+        input_frame.grid_columnconfigure(1, weight=1)
+
+        self._hint_label = ctk.CTkLabel(
+            input_frame,
+            text="Valor (R$)",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            width=110,
+        )
+        self._hint_label.grid(row=0, column=0, padx=(0, 12))
 
         self.amount_entry = ctk.CTkEntry(
             input_frame,
@@ -136,49 +201,82 @@ class HighRiskInvestmentsPage(ctk.CTkFrame):
         )
         self.amount_entry.grid(row=0, column=1, sticky="ew")
 
-        # ── Erro ─────────────────────────────────────────────────────────────
+        # ── Erro + botão confirmar ────────────────────────────────────────────
         ctk.CTkLabel(
             self,
             textvariable=self._error_text,
             text_color="#e05c5c",
             font=ctk.CTkFont(size=12),
-        ).grid(row=4, column=0, padx=40, pady=(10, 0))
-
-        # ── Botões comprar / vender ───────────────────────────────────────────
-        btn_frame = ctk.CTkFrame(self, fg_color="transparent")
-        btn_frame.grid(row=5, column=0, padx=40, pady=(12, 36))
-        btn_frame.grid_columnconfigure((0, 1), weight=1)
+        ).grid(row=5, column=0, padx=40, pady=(6, 0))
 
         ctk.CTkButton(
-            btn_frame,
-            text="Comprar  →",
-            font=ctk.CTkFont(size=14, weight="bold"),
-            width=160,
-            height=44,
+            self,
+            text="Confirmar  →",
+            font=ctk.CTkFont(size=15, weight="bold"),
+            width=200, height=44,
             corner_radius=10,
-            fg_color="#3b82d4",
-            command=self._on_buy_click,
-        ).grid(row=0, column=0, padx=(0, 10))
+            command=self._on_confirm,
+        ).grid(row=6, column=0, padx=40, pady=(8, 0))
 
-        ctk.CTkButton(
-            btn_frame,
-            text="Vender  ↓",
-            font=ctk.CTkFont(size=14, weight="bold"),
-            width=160,
-            height=44,
-            corner_radius=10,
-            fg_color="#7c5cd8",
-            command=self._on_sell_click,
-        ).grid(row=0, column=1, padx=(10, 0))
+        # ── Posições do portfólio ─────────────────────────────────────────────
+        if self._portfolio_positions:
+            ctk.CTkLabel(
+                self,
+                text="Sua carteira",
+                font=ctk.CTkFont(size=13, weight="bold"),
+                anchor="w",
+            ).grid(row=7, column=0, padx=40, pady=(16, 4), sticky="w")
+
+            scroll_port = ctk.CTkScrollableFrame(self, height=100, corner_radius=10)
+            scroll_port.grid(row=8, column=0, padx=40, pady=(0, 24), sticky="ew")
+            scroll_port.grid_columnconfigure(0, weight=1)
+
+            for i, pos in enumerate(self._portfolio_positions):
+                pnl = pos.get("unrealized_pnl", 0.0)
+                pnl_pct = pos.get("unrealized_pnl_pct", 0.0)
+                sign = "+" if pnl >= 0 else ""
+                pnl_color = "#4caf50" if pnl >= 0 else "#e05c5c"
+                # Clique na posição seleciona o ticker automaticamente
+                btn = ctk.CTkButton(
+                    scroll_port,
+                    text=(
+                        f"{pos['ticker']:<7}"
+                        f"  {pos['shares']:.4f} cotas"
+                        f"  @ R$ {pos['avg_purchase_price']:.2f}"
+                        f"  →  R$ {pos['current_value']:,.2f}"
+                        f"  ({sign}{pnl_pct:.1f}%)"
+                    ),
+                    font=ctk.CTkFont(size=12, family="Courier"),
+                    height=38,
+                    corner_radius=8,
+                    fg_color="gray20",
+                    hover_color="gray30",
+                    anchor="w",
+                    command=lambda t=pos["ticker"]: self._select_ticker(t),
+                )
+                btn.grid(row=i, column=0, pady=3, sticky="ew")
+        else:
+            ctk.CTkFrame(self, height=24, fg_color="transparent").grid(row=7, column=0)
+
+    # ── Helpers ───────────────────────────────────────────────────────────────
+
+    def _update_hint(self):
+        if self._mode.get() == "buy":
+            self._hint_label.configure(text="Valor (R$)")
+            self.amount_entry.configure(placeholder_text="Ex: 500.00")
+        else:
+            self._hint_label.configure(text="Qtd. cotas")
+            self.amount_entry.configure(placeholder_text="Ex: 10.5")
+        self._error_text.set("")
 
     def _select_ticker(self, ticker: str):
         self._selected_ticker = ticker
+        self._error_text.set("")
         for btn in self._stock_buttons:
-            text = btn.cget("text")
-            if text.startswith(ticker):
-                btn.configure(fg_color="#3b82d4")
-            else:
-                btn.configure(fg_color="gray20")
+            txt = btn.cget("text")
+            btn.configure(
+                fg_color="#3b82d4" if txt.startswith(ticker) else "gray20"
+            )
 
     def _parse_amount(self) -> float | None:
         raw = self.amount_entry.get().strip().replace(",", ".")
@@ -191,25 +289,41 @@ class HighRiskInvestmentsPage(ctk.CTkFrame):
             self._error_text.set("⚠  Valor inválido. Use um número positivo.")
             return None
 
-    def _on_buy_click(self):
+    def _on_confirm(self):
         if not self._selected_ticker:
             self._error_text.set("⚠  Selecione uma ação primeiro.")
             return
         amount = self._parse_amount()
         if amount is None:
             return
-        self._error_text.set("")
-        self._on_buy(self._selected_ticker, amount)
 
-    def _on_sell_click(self):
-        if not self._selected_ticker:
-            self._error_text.set("⚠  Selecione uma ação primeiro.")
-            return
-        shares = self._parse_amount()
-        if shares is None:
-            return
-        self._error_text.set("")
-        self._on_sell(self._selected_ticker, shares)
+        if self._mode.get() == "buy":
+            if amount > self._cash:
+                self._error_text.set(
+                    f"⚠  Saldo insuficiente. Disponível: R$ {self._cash:,.2f}"
+                )
+                return
+            self._error_text.set("")
+            self._on_buy(self._selected_ticker, amount)
+        else:
+            # Verificar se tem cotas suficientes
+            pos = next(
+                (p for p in self._portfolio_positions
+                 if p["ticker"] == self._selected_ticker),
+                None,
+            )
+            if pos is None:
+                self._error_text.set(
+                    f"⚠  Você não possui cotas de {self._selected_ticker}."
+                )
+                return
+            if amount > pos.get("shares", 0):
+                self._error_text.set(
+                    f"⚠  Você possui apenas {pos['shares']:.4f} cotas de {self._selected_ticker}."
+                )
+                return
+            self._error_text.set("")
+            self._on_sell(self._selected_ticker, amount)
 
 
 # ---------------------------------------------------------------------------
@@ -222,11 +336,28 @@ if __name__ == "__main__":
 
     root = ctk.CTk()
     root.title("Renda Variável")
-    root.geometry("700x540")
+    root.geometry("700x620")
     root.resizable(False, False)
+
+    _demo_stocks = [
+        {"ticker": "BRCO3", "name": "Banco do Reinos S.A.", "sector": "Financeiro",
+         "price": 28.50, "change_pct": +1.2, "trend": "📈 Alta", "cycles_in_trend": 2},
+        {"ticker": "PTRX4", "name": "PetroReinos S.A.", "sector": "Energia",
+         "price": 35.00, "change_pct": -2.5, "trend": "📉 Baixa", "cycles_in_trend": 1},
+        {"ticker": "GLDX3", "name": "Guildas de Ouro S.A.", "sector": "Mineração",
+         "price": 55.00, "change_pct": 0.1, "trend": "➡️  Estável", "cycles_in_trend": 5},
+    ]
+    _demo_portfolio = [
+        {"ticker": "BRCO3", "shares": 35.0877, "avg_purchase_price": 27.10,
+         "current_price": 28.50, "current_value": 1000.00,
+         "unrealized_pnl": +49.23, "unrealized_pnl_pct": +5.16},
+    ]
 
     HighRiskInvestmentsPage(
         master=root,
+        stocks=_demo_stocks,
+        portfolio_positions=_demo_portfolio,
+        cash=2500.00,
         on_buy=lambda t, a: print(f"Comprar R$ {a:.2f} de {t}"),
         on_sell=lambda t, s: print(f"Vender {s} cotas de {t}"),
         on_back=lambda: print("← Voltar"),

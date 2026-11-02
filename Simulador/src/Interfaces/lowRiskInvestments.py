@@ -3,8 +3,13 @@ lowRiskInvestments.py
 ---------------------
 Tela de investimentos de baixo risco (Renda Fixa).
 
-Exibe os produtos disponíveis em cards e permite que o usuário
-selecione um produto e insira um valor para investir.
+Exibe os produtos disponíveis com dados reais do engine (taxa, prazo, mínimo)
+e as posições abertas do portfólio para resgate.
+
+Callbacks:
+  on_invest(product_key: str, amount: float)  → comprar novo produto
+  on_redeem(position_index: int)              → resgatar posição existente
+  on_back()                                   → voltar
 """
 
 from __future__ import annotations
@@ -14,43 +19,6 @@ from typing import Callable
 import customtkinter as ctk
 
 
-# Produtos placeholder — serão substituídos pelos dados reais do engine
-_PLACEHOLDER_PRODUCTS = [
-    {
-        "label": "Tesouro Selic",
-        "indexer": "SELIC",
-        "rate": "SELIC + 0,0%",
-        "maturity": "Liquidez diária",
-        "min": "R$ 100,00",
-        "ir_exempt": False,
-    },
-    {
-        "label": "CDB Diário",
-        "indexer": "CDI",
-        "rate": "100% CDI",
-        "maturity": "Liquidez diária",
-        "min": "R$ 500,00",
-        "ir_exempt": False,
-    },
-    {
-        "label": "LCI 90 dias",
-        "indexer": "CDI",
-        "rate": "92% CDI",
-        "maturity": "90 dias",
-        "min": "R$ 1.000,00",
-        "ir_exempt": True,
-    },
-    {
-        "label": "Tesouro IPCA+",
-        "indexer": "IPCA",
-        "rate": "IPCA + 5,5%",
-        "maturity": "5 anos",
-        "min": "R$ 100,00",
-        "ir_exempt": False,
-    },
-]
-
-
 class LowRiskInvestmentsPage(ctk.CTkFrame):
     """Tela de Renda Fixa / investimentos de baixo risco."""
 
@@ -58,42 +26,64 @@ class LowRiskInvestmentsPage(ctk.CTkFrame):
         self,
         master,
         products: list[dict] | None = None,
+        open_positions: list[dict] | None = None,
+        cash: float = 0.0,
         on_invest: Callable[[str, float], None] | None = None,
+        on_redeem: Callable[[int], None] | None = None,
         on_back: Callable | None = None,
         **kwargs,
     ):
         """
         Args:
-            master:     Widget pai.
-            products:   Lista de produtos (dicts com label, rate, maturity, min,
-                        ir_exempt). Se None, usa placeholders.
-            on_invest:  Callback(product_label, amount) chamado ao confirmar.
-            on_back:    Callback para voltar à página anterior.
+            master:          Widget pai.
+            products:        Lista de dicts com:
+                               key (str)              – FixedIncomeType.value
+                               label (str)
+                               rate_display (str)     – ex: "100% CDI"
+                               maturity (str)         – ex: "Liquidez diária"
+                               min_investment (float)
+                               ir_exempt (bool)
+                               description (str)
+            open_positions:  Lista de dicts com campos do snapshot da posição:
+                               index (int)                  – índice em fixed_positions
+                               label (str)
+                               principal_with_earnings (float)
+                               gross_earnings (float)
+                               months_held (int)
+                               can_redeem (bool)
+                               is_mature (bool)
+            cash:            Saldo disponível em caixa.
+            on_invest:       Callback(product_key, amount).
+            on_redeem:       Callback(position_index).
+            on_back:         Callback para voltar.
         """
         super().__init__(master, **kwargs)
-        self._products = products or _PLACEHOLDER_PRODUCTS
-        self._on_invest = on_invest or (lambda label, amt: None)
+        self._products = products or []
+        self._open_positions = open_positions or []
+        self._cash = cash
+        self._on_invest = on_invest or (lambda key, amt: None)
+        self._on_redeem = on_redeem or (lambda idx: None)
         self._on_back = on_back or (lambda: None)
-        self._selected_product: str | None = None
+        self._selected_product_key: str | None = None
         self._error_text = ctk.StringVar(value="")
         self._build()
+
+    # ── Build ─────────────────────────────────────────────────────────────────
 
     def _build(self):
         self.grid_columnconfigure(0, weight=1)
 
         # ── Cabeçalho ────────────────────────────────────────────────────────
         header = ctk.CTkFrame(self, fg_color="transparent")
-        header.grid(row=0, column=0, padx=40, pady=(36, 0), sticky="ew")
+        header.grid(row=0, column=0, padx=40, pady=(28, 0), sticky="ew")
         header.grid_columnconfigure(1, weight=1)
 
         ctk.CTkButton(
             header,
             text="←",
-            width=36,
-            height=36,
+            width=36, height=36,
             corner_radius=8,
-            fg_color="gray25",
-            hover_color="gray30",
+            fg_color="gray25", hover_color="gray30",
             command=self._on_back,
         ).grid(row=0, column=0, padx=(0, 12))
 
@@ -105,37 +95,58 @@ class LowRiskInvestmentsPage(ctk.CTkFrame):
         ).grid(row=0, column=1, sticky="w")
 
         ctk.CTkLabel(
+            header,
+            text=f"💵  Disponível: R$ {self._cash:,.2f}",
+            font=ctk.CTkFont(size=13),
+            text_color="#4caf50",
+            anchor="e",
+        ).grid(row=0, column=2, sticky="e")
+
+        # ── Produtos disponíveis ──────────────────────────────────────────────
+        ctk.CTkLabel(
             self,
-            text="Selecione um produto e informe o valor a investir",
+            text="Produtos disponíveis — selecione e informe o valor",
             font=ctk.CTkFont(size=13),
             text_color="gray",
-        ).grid(row=1, column=0, padx=40, pady=(4, 20))
+        ).grid(row=1, column=0, padx=40, pady=(14, 6), sticky="w")
 
-        # ── Lista de produtos ────────────────────────────────────────────────
-        scroll = ctk.CTkScrollableFrame(self, height=200, corner_radius=10)
-        scroll.grid(row=2, column=0, padx=40, pady=0, sticky="ew")
-        scroll.grid_columnconfigure(0, weight=1)
+        scroll_prod = ctk.CTkScrollableFrame(self, height=160, corner_radius=10)
+        scroll_prod.grid(row=2, column=0, padx=40, pady=0, sticky="ew")
+        scroll_prod.grid_columnconfigure(0, weight=1)
 
         self._product_buttons: list[ctk.CTkButton] = []
-        for i, prod in enumerate(self._products):
-            exempt_tag = "  ✅ Isento IR" if prod.get("ir_exempt") else ""
-            btn = ctk.CTkButton(
-                scroll,
-                text=f"{prod['label']}   |   {prod['rate']}   |   Venc: {prod['maturity']}   |   Mín: {prod['min']}{exempt_tag}",
-                font=ctk.CTkFont(size=12),
-                height=40,
-                corner_radius=8,
-                fg_color="gray20",
-                hover_color="gray30",
-                anchor="w",
-                command=lambda p=prod["label"]: self._select_product(p),
-            )
-            btn.grid(row=i, column=0, pady=4, sticky="ew")
-            self._product_buttons.append(btn)
+        if self._products:
+            for i, prod in enumerate(self._products):
+                exempt_tag = "  ✅ Isento IR" if prod.get("ir_exempt") else ""
+                can_afford = self._cash >= prod.get("min_investment", 0)
+                fg = "gray20" if can_afford else "gray15"
+                btn = ctk.CTkButton(
+                    scroll_prod,
+                    text=(
+                        f"{prod['label']}   |   {prod['rate_display']}"
+                        f"   |   Venc: {prod['maturity']}"
+                        f"   |   Mín: R$ {prod['min_investment']:,.2f}"
+                        f"{exempt_tag}"
+                    ),
+                    font=ctk.CTkFont(size=12),
+                    height=40,
+                    corner_radius=8,
+                    fg_color=fg,
+                    hover_color="gray30" if can_afford else "gray15",
+                    anchor="w",
+                    state="normal" if can_afford else "disabled",
+                    command=lambda k=prod["key"]: self._select_product(k),
+                )
+                btn.grid(row=i, column=0, pady=3, sticky="ew")
+                self._product_buttons.append(btn)
+        else:
+            ctk.CTkLabel(
+                scroll_prod, text="Nenhum produto disponível.", text_color="gray"
+            ).grid(row=0, column=0, pady=12)
 
-        # ── Input de valor ───────────────────────────────────────────────────
+        # ── Input + botão investir ────────────────────────────────────────────
         input_frame = ctk.CTkFrame(self, fg_color="transparent")
-        input_frame.grid(row=3, column=0, padx=40, pady=(20, 0), sticky="ew")
+        input_frame.grid(row=3, column=0, padx=40, pady=(12, 0), sticky="ew")
         input_frame.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(
@@ -151,35 +162,75 @@ class LowRiskInvestmentsPage(ctk.CTkFrame):
         )
         self.amount_entry.grid(row=0, column=1, sticky="ew")
 
-        # ── Erro + botão ─────────────────────────────────────────────────────
         ctk.CTkLabel(
             self,
             textvariable=self._error_text,
             text_color="#e05c5c",
             font=ctk.CTkFont(size=12),
-        ).grid(row=4, column=0, padx=40, pady=(10, 0))
+        ).grid(row=4, column=0, padx=40, pady=(6, 0))
 
         ctk.CTkButton(
             self,
             text="Investir  →",
             font=ctk.CTkFont(size=15, weight="bold"),
-            width=200,
-            height=44,
+            width=200, height=44,
             corner_radius=10,
             command=self._on_confirm,
-        ).grid(row=5, column=0, padx=40, pady=(12, 36))
+        ).grid(row=5, column=0, padx=40, pady=(8, 0))
 
-    def _select_product(self, label: str):
-        self._selected_product = label
+        # ── Posições abertas ──────────────────────────────────────────────────
+        if self._open_positions:
+            ctk.CTkLabel(
+                self,
+                text="Posições abertas  (clique para resgatar)",
+                font=ctk.CTkFont(size=13, weight="bold"),
+                anchor="w",
+            ).grid(row=6, column=0, padx=40, pady=(18, 4), sticky="w")
+
+            scroll_pos = ctk.CTkScrollableFrame(self, height=110, corner_radius=10)
+            scroll_pos.grid(row=7, column=0, padx=40, pady=(0, 24), sticky="ew")
+            scroll_pos.grid_columnconfigure(0, weight=1)
+
+            for pos in self._open_positions:
+                mature_tag = "  🔓 Disponível" if pos.get("can_redeem") else "  🔒 Em carência"
+                fg = "#3b5a2a" if pos.get("can_redeem") else "gray20"
+                hv = "#4a7a3a" if pos.get("can_redeem") else "gray20"
+                ctk.CTkButton(
+                    scroll_pos,
+                    text=(
+                        f"[{pos['index']+1}] {pos['label']}"
+                        f"   |   R$ {pos['principal_with_earnings']:,.2f}"
+                        f"  (+R$ {pos['gross_earnings']:,.2f})"
+                        f"   |   {pos['months_held']} mês(es)"
+                        f"{mature_tag}"
+                    ),
+                    font=ctk.CTkFont(size=12),
+                    height=38,
+                    corner_radius=8,
+                    fg_color=fg,
+                    hover_color=hv,
+                    anchor="w",
+                    state="normal" if pos.get("can_redeem") else "disabled",
+                    command=lambda idx=pos["index"]: self._on_redeem(idx),
+                ).grid(row=pos["index"], column=0, pady=3, sticky="ew")
+        else:
+            ctk.CTkFrame(self, height=24, fg_color="transparent").grid(row=6, column=0)
+
+    # ── Helpers ───────────────────────────────────────────────────────────────
+
+    def _select_product(self, key: str):
+        self._selected_product_key = key
+        self._error_text.set("")
         for btn in self._product_buttons:
-            text = btn.cget("text")
-            if text.startswith(label):
-                btn.configure(fg_color="#3b82d4")
-            else:
-                btn.configure(fg_color="gray20")
+            txt = btn.cget("text")
+            matched = any(
+                p["key"] == key and txt.startswith(p["label"])
+                for p in self._products
+            )
+            btn.configure(fg_color="#3b82d4" if matched else "gray20")
 
     def _on_confirm(self):
-        if not self._selected_product:
+        if not self._selected_product_key:
             self._error_text.set("⚠  Selecione um produto antes de investir.")
             return
 
@@ -192,8 +243,22 @@ class LowRiskInvestmentsPage(ctk.CTkFrame):
             self._error_text.set("⚠  Valor inválido. Use um número positivo.")
             return
 
+        prod = next(
+            (p for p in self._products if p["key"] == self._selected_product_key), None
+        )
+        if prod and amount < prod.get("min_investment", 0):
+            self._error_text.set(
+                f"⚠  Mínimo para {prod['label']}: R$ {prod['min_investment']:,.2f}"
+            )
+            return
+        if amount > self._cash:
+            self._error_text.set(
+                f"⚠  Saldo insuficiente. Disponível: R$ {self._cash:,.2f}"
+            )
+            return
+
         self._error_text.set("")
-        self._on_invest(self._selected_product, amount)
+        self._on_invest(self._selected_product_key, amount)
 
 
 # ---------------------------------------------------------------------------
@@ -206,12 +271,31 @@ if __name__ == "__main__":
 
     root = ctk.CTk()
     root.title("Renda Fixa")
-    root.geometry("680x520")
+    root.geometry("680x580")
     root.resizable(False, False)
+
+    _demo_products = [
+        {"key": "Tesouro Selic", "label": "Tesouro Selic", "rate_display": "100% SELIC",
+         "maturity": "Liquidez diária", "min_investment": 100.0, "ir_exempt": False,
+         "description": "Rendimento atrelado à SELIC."},
+        {"key": "LCI 6 meses", "label": "LCI 6 meses", "rate_display": "93% CDI",
+         "maturity": "6 meses", "min_investment": 5000.0, "ir_exempt": True,
+         "description": "Isento de IR."},
+    ]
+    _demo_positions = [
+        {"index": 0, "label": "Tesouro Selic", "principal_with_earnings": 2050.30,
+         "gross_earnings": 50.30, "months_held": 3, "can_redeem": True, "is_mature": False},
+        {"index": 1, "label": "CDB 90 dias", "principal_with_earnings": 1025.10,
+         "gross_earnings": 25.10, "months_held": 2, "can_redeem": False, "is_mature": False},
+    ]
 
     LowRiskInvestmentsPage(
         master=root,
-        on_invest=lambda label, amt: print(f"Investir R$ {amt:.2f} em {label}"),
+        products=_demo_products,
+        open_positions=_demo_positions,
+        cash=3500.00,
+        on_invest=lambda key, amt: print(f"Investir R$ {amt:.2f} em '{key}'"),
+        on_redeem=lambda idx: print(f"Resgatar posição {idx}"),
         on_back=lambda: print("← Voltar"),
         fg_color="transparent",
     ).pack(fill="both", expand=True)
