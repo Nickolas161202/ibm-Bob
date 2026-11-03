@@ -51,7 +51,7 @@ import sys
 from dataclasses import asdict
 from enum import Enum, auto
 from pathlib import Path
-from typing import Callable, Callable, Optional
+from typing import Callable, Optional
 
 import customtkinter as ctk
 
@@ -87,107 +87,6 @@ from src.Interfaces.profileConfirm import ProfileConfirmDialog
 # ─────────────────────────────────────────────────────────────────────────────
 # State enumeration — mirrors every node in states_ibm.json
 # ─────────────────────────────────────────────────────────────────────────────
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Profile inference stubs (full AI-driven inference implemented separately)
-# ─────────────────────────────────────────────────────────────────────────────
-
-from dataclasses import dataclass, field as _field
-
-
-@dataclass
-class ProfileInferenceEntry:
-    cycle: int
-    score: int
-    main_weakness: str
-    inferred_risk: str
-    inferred_level: str
-    reasoning: str = ""
-    applied: bool = False
-    confirmed_by_user: bool = False
-
-
-@dataclass
-class _InferenceState:
-    history: list[ProfileInferenceEntry] = _field(default_factory=list)
-    _silent_streak: int = 0
-    _confirm_streak: int = 0
-
-    def record(self, entry: ProfileInferenceEntry):
-        self.history.append(entry)
-
-    @property
-    def last_score(self) -> int:
-        return self.history[-1].score if self.history else 0
-
-    @property
-    def completed_quests(self) -> int:
-        return len(self.history)
-
-    @property
-    def main_weakness(self) -> str:
-        return self.history[-1].main_weakness if self.history else "não identificada"
-
-    def needs_confirmation(
-        self,
-        new_risk: str,
-        new_level: str,
-        current_risk: str,
-        current_level: str,
-    ) -> bool:
-        """Show confirmation dialog after 2 consecutive silent updates."""
-        return self._silent_streak >= 2
-
-    def mark_confirmed(self):
-        self._confirm_streak += 1
-        self._silent_streak = 0
-
-    def mark_silent_update(self):
-        self._silent_streak += 1
-
-
-class ProfileConfirmDialog(ctk.CTkToplevel):
-    """Minimal confirmation dialog for inferred profile changes."""
-
-    def __init__(
-        self,
-        master,
-        current_risk: str,
-        current_level: str,
-        inferred_risk: str,
-        inferred_level: str,
-        reasoning: str,
-        on_confirm: Callable,
-        on_reject: Callable,
-        **kwargs,
-    ):
-        super().__init__(master, **kwargs)
-        self.title("Atualizar Perfil?")
-        self.geometry("420x260")
-        self.resizable(False, False)
-
-        ctk.CTkLabel(
-            self,
-            text="O agente identificou mudanças no seu perfil:",
-            font=ctk.CTkFont(size=13, weight="bold"),
-        ).pack(pady=(20, 6), padx=24)
-
-        ctk.CTkLabel(
-            self,
-            text=(
-                f"Risco: {current_risk} → {inferred_risk}\n"
-                f"Nível: {current_level} → {inferred_level}\n\n"
-                f"{reasoning}"
-            ),
-            justify="left",
-            wraplength=370,
-        ).pack(padx=24, pady=(0, 16))
-
-        btn_frame = ctk.CTkFrame(self, fg_color="transparent")
-        btn_frame.pack(pady=(0, 20))
-        ctk.CTkButton(btn_frame, text="Confirmar", command=lambda: (on_confirm(), self.destroy())).pack(side="left", padx=8)
-        ctk.CTkButton(btn_frame, text="Ignorar",   command=lambda: (on_reject(),  self.destroy())).pack(side="left", padx=8)
-
 
 class AppState(Enum):
     INICIAL              = auto()   # i2zG1y6y6l51
@@ -259,11 +158,6 @@ class App(ctk.CTk):
         if self._profile is not None:
             self._engine = SimulatorEngine()
             self._engine.create_portfolio(self._profile, initial_cash=self._profile.monthly_surplus)
-
-        # ── inference state (tracks AI-inferred profile updates) ─────────────
-        self._inference_state = _InferenceState()
-        self._active_quest: dict = {}
-        self._quest_start_log_len: int = 0
 
         # ── profile inference state ───────────────────────────────────────────
         self._inference_state: ProfileInferenceState = ProfileInferenceState()
@@ -821,6 +715,7 @@ class App(ctk.CTk):
         )
 
         def apply_update():
+            assert self._profile is not None
             self._profile.risk_profile    = new_risk
             self._profile.knowledge_level = new_level
             # mark last entry as applied
