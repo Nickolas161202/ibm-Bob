@@ -301,20 +301,24 @@ class App(ctk.CTk):
             ]
 
             def on_invest(product_key: str, amount: float):
-                try:
-                    ftype = FixedIncomeType(product_key)
-                    self._engine.buy_fixed(portfolio, ftype, amount)
-                    print(f"[LOW RISK] Investido R$ {amount:.2f} em {product_key}")
-                except Exception as e:
-                    print(f"[LOW RISK] Erro ao investir: {e}")
+                p = self._current_portfolio()
+                if self._engine is not None and p is not None:
+                    try:
+                        ftype = FixedIncomeType(product_key)
+                        self._engine.buy_fixed(p, ftype, amount)
+                        print(f"[LOW RISK] Investido R$ {amount:.2f} em {product_key}")
+                    except Exception as e:
+                        print(f"[LOW RISK] Erro ao investir: {e}")
                 self._transition(AppState.SIMULATOR_MAIN)
 
             def on_redeem(position_index: int):
-                try:
-                    redeemed = self._engine.redeem_fixed(portfolio, position_index)
-                    print(f"[LOW RISK] Resgatado R$ {redeemed:.2f} (posição {position_index})")
-                except Exception as e:
-                    print(f"[LOW RISK] Erro ao resgatar: {e}")
+                p = self._current_portfolio()
+                if self._engine is not None and p is not None:
+                    try:
+                        redeemed = self._engine.redeem_fixed(p, position_index)
+                        print(f"[LOW RISK] Resgatado R$ {redeemed:.2f} (posição {position_index})")
+                    except Exception as e:
+                        print(f"[LOW RISK] Erro ao resgatar: {e}")
                 self._transition(AppState.SIMULATOR_MAIN)
 
             return LowRiskInvestmentsPage(
@@ -345,19 +349,23 @@ class App(ctk.CTk):
             portfolio_positions = snap.get("stock_positions", [])
 
             def on_buy(ticker: str, amount: float):
-                try:
-                    self._engine.buy_stock(portfolio, ticker, amount)
-                    print(f"[HIGH RISK] Comprado R$ {amount:.2f} de {ticker}")
-                except Exception as e:
-                    print(f"[HIGH RISK] Erro ao comprar: {e}")
+                p = self._current_portfolio()
+                if self._engine is not None and p is not None:
+                    try:
+                        self._engine.buy_stock(p, ticker, amount)
+                        print(f"[HIGH RISK] Comprado R$ {amount:.2f} de {ticker}")
+                    except Exception as e:
+                        print(f"[HIGH RISK] Erro ao comprar: {e}")
                 self._transition(AppState.SIMULATOR_MAIN)
 
             def on_sell(ticker: str, shares: float):
-                try:
-                    proceeds = self._engine.sell_stock(portfolio, ticker, shares)
-                    print(f"[HIGH RISK] Vendido {shares} cotas de {ticker} → R$ {proceeds:.2f}")
-                except Exception as e:
-                    print(f"[HIGH RISK] Erro ao vender: {e}")
+                p = self._current_portfolio()
+                if self._engine is not None and p is not None:
+                    try:
+                        proceeds = self._engine.sell_stock(p, ticker, shares)
+                        print(f"[HIGH RISK] Vendido {shares} cotas de {ticker} → R$ {proceeds:.2f}")
+                    except Exception as e:
+                        print(f"[HIGH RISK] Erro ao vender: {e}")
                 self._transition(AppState.SIMULATOR_MAIN)
 
             return HighRiskInvestmentsPage(
