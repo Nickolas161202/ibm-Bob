@@ -681,6 +681,7 @@ class App(ctk.CTk):
         )
 
         def apply_update():
+            assert self._profile is not None
             self._profile.risk_profile    = new_risk
             self._profile.knowledge_level = new_level
             # mark last entry as applied

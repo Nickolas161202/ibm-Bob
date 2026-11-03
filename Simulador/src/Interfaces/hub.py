@@ -152,49 +152,28 @@ class HubPage(ctk.CTkFrame):
         """
         Renderiza um card-botão clicável com ícone, título e subtítulo.
         O card `accent=True` usa a cor de destaque do tema.
+
+        Implementado como CTkButton de texto vazio com anchor w, para garantir
+        que o command é disparado independentemente de onde o clique ocorra.
         """
+        fg  = ("#2b5f8c", "#1a3a5c") if accent else ("gray20", "gray17")
+        hov = ("#3a7ab8", "#2a5080") if accent else ("gray30", "gray25")
+
+        # O botão ocupa toda a largura e exibe o conteúdo textual diretamente.
+        # Usar um CTkButton com text formatado evita o problema de widgets
+        # filhos interceptando os eventos de clique.
         card = ctk.CTkButton(
             parent,
-            text="",
+            text=f"{icon}   {title}\n        {subtitle}",
+            font=ctk.CTkFont(size=14, weight="bold"),
             height=72,
             corner_radius=12,
-            fg_color=("#2b5f8c", "#1a3a5c") if accent else ("gray20", "gray17"),
-            hover_color=("#3a7ab8", "#2a5080") if accent else ("gray30", "gray25"),
+            fg_color=fg,
+            hover_color=hov,
+            anchor="w",
             command=command,
         )
         card.grid(row=row, column=0, pady=(0, 10), sticky="ew")
-
-        # layout interno do card
-        inner = ctk.CTkFrame(card, fg_color="transparent")
-        inner.place(relx=0.0, rely=0.0, relwidth=1.0, relheight=1.0)
-        inner.grid_columnconfigure(1, weight=1)
-
-        # ícone
-        ctk.CTkLabel(
-            inner,
-            text=icon,
-            font=ctk.CTkFont(size=28),
-            width=52,
-        ).grid(row=0, column=0, rowspan=2, padx=(20, 12), pady=12)
-
-        # título
-        ctk.CTkLabel(
-            inner,
-            text=title,
-            font=ctk.CTkFont(size=15, weight="bold"),
-            anchor="w",
-        ).grid(row=0, column=1, padx=(0, 16), pady=(14, 1), sticky="w")
-
-        # subtítulo
-        ctk.CTkLabel(
-            inner,
-            text=subtitle,
-            font=ctk.CTkFont(size=12),
-            text_color="gray70",
-            anchor="w",
-            wraplength=340,
-            justify="left",
-        ).grid(row=1, column=1, padx=(0, 16), pady=(1, 14), sticky="w")
 
 
 # -----------------------------------------------------------------------------
