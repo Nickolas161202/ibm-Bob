@@ -1,0 +1,59 @@
+[
+  {
+    "id": "fd87356f-72ab-4860-a275-61b554d2ce42",
+    "topic": "LCA",
+    "source_text": "A Letra de Crédito do Agronegócio (LCA) é um título de renda fixa emitido por instituições financeiras com o objetivo de captar recursos destinados ao financiamento de produtores rurais e cooperativas ligadas ao agronegócio brasileiro. Seu fundamento legal está na Lei nº 11.076/2004, que criou os principais instrumentos de captação do setor. Assim como o CDB, a LCA é emitida por bancos, mas possui uma vantagem tributária significativa: os rendimentos são isentos de Imposto de Renda para pessoas físicas, independentemente do prazo de aplicação. Esse benefício fiscal torna a LCA especialmente atrativa quando comparada a outros títulos de renda fixa tributados. A remuneração pode ser prefixada (taxa definida no momento da aplicação), pós-fixada (geralmente atrelada ao CDI, como 90% ou 100% do CDI) ou híbrida (IPCA + taxa fixa). O prazo mínimo de vencimento é de 90 dias, e a liquidez varia conforme o emissor — muitas LCAs possuem carência, ou seja, o investidor não pode resgatar o dinheiro antes de um período determinado. As LCAs são cobertas pelo Fundo Garantidor de Créditos (FGC) até o limite de R$ 250.000 por CPF por instituição financeira (com teto global de R$ 1.000.000 por CPF a cada 4 anos), o que confere segurança adicional ao investidor. Para comparar uma LCA com um CDB tributado, utiliza-se a taxa equivalente bruta: Taxa Equivalente = Taxa LCA / (1 - Alíquota IR). Por exemplo, uma LCA a 88% do CDI equivale a um CDB de aproximadamente 103,5% do CDI para um investidor na alíquota de 15% de IR (prazo entre 1 e 2 anos). A escolha entre LCA e outros instrumentos deve considerar o prazo de carência, a solidez do banco emissor, a taxa oferecida e o horizonte de investimento do aplicador.",
+    "adapted_text": "Imagine que você empresta seu dinheiro para um banco, e esse banco usa esse dinheiro para financiar fazendeiros e cooperativas no campo. Em troca, você recebe juros ao final do período. Esse é, em essência, o funcionamento da LCA — a Letra de Crédito do Agronegócio. Ela é um investimento de renda fixa, ou seja, você já sabe (ou consegue estimar) quanto vai receber ao final. A grande vantagem da LCA para quem está buscando independência financeira é que ela é **isenta de Imposto de Renda para pessoas físicas**. Isso significa que tudo que você ganhar de rendimento vai direto para o seu bolso, sem desconto do governo. Essa isenção faz uma diferença enorme no longo prazo quando você está acumulando patrimônio. Por exemplo, uma LCA que paga 90% do CDI pode ser mais rentável na prática do que um CDB que paga 105% do CDI, porque o CDB tem IR descontado e a LCA não. Para josé, no perfil conservador, a LCA é uma excelente opção: ela tem proteção do FGC (o 'seguro' dos investimentos bancários) de até R$ 250 mil por banco, o que a torna tão segura quanto a poupança — mas com rendimento muito superior. O único ponto de atenção é a **carência**: muitas LCAs não permitem resgate antes de 90 dias ou mais. Então, coloque na LCA apenas o dinheiro que você não vai precisar no curto prazo. Uma boa estratégia para quem quer independência financeira é usar LCAs de diferentes bancos e prazos para ir construindo um 'escalonamento' de vencimentos, garantindo que sempre haverá dinheiro disponível em determinados períodos sem abrir mão dos juros.",
+    "quiz": [
+      {
+        "question": "Qual é a principal vantagem tributária da LCA em relação ao CDB para pessoa física?",
+        "options": [
+          "A LCA tem alíquota de IR reduzida a 10% para todos os prazos",
+          "A LCA é isenta de Imposto de Renda para pessoas físicas",
+          "A LCA é isenta de IOF, mas paga IR normalmente",
+          "A LCA e o CDB têm o mesmo tratamento tributário"
+        ],
+        "correct_index": 1,
+        "explanation": "A LCA é totalmente isenta de Imposto de Renda para pessoas físicas, independentemente do prazo de aplicação. Essa isenção é seu principal diferencial em relação ao CDB, que segue a tabela regressiva de IR (de 22,5% a 15%)."
+      },
+      {
+        "question": "Até qual valor as LCAs são cobertas pelo Fundo Garantidor de Créditos (FGC) por CPF por instituição?",
+        "options": [
+          "R$ 100.000",
+          "R$ 500.000",
+          "R$ 250.000",
+          "R$ 1.000.000"
+        ],
+        "correct_index": 2,
+        "explanation": "O FGC garante até R$ 250.000 por CPF por instituição financeira para LCAs (e outros investimentos cobertos como CDB e poupança). Existe ainda um teto global de R$ 1.000.000 por CPF a cada 4 anos considerando todas as instituições."
+      },
+      {
+        "question": "Uma LCA rende 88% do CDI e um CDB rende 103% do CDI. Para um investidor pessoa física com IR de 15%, qual dos dois é mais vantajoso?",
+        "options": [
+          "O CDB, porque 103% é maior que 88%",
+          "A LCA, porque a isenção de IR torna seu rendimento líquido superior",
+          "São equivalentes, pois o IR do CDB compensa exatamente a diferença",
+          "Depende apenas do prazo, não da alíquota de IR"
+        ],
+        "correct_index": 1,
+        "explanation": "Para comparar corretamente, é preciso calcular a taxa equivalente bruta da LCA: 88% / (1 - 0,15) = 103,5% do CDI. Portanto, a LCA a 88% do CDI equivale a um CDB de ~103,5% do CDI para quem está na alíquota de 15%. Como o CDB oferece 103%, a LCA é marginalmente mais vantajosa nesse cenário."
+      },
+      {
+        "question": "O que significa dizer que uma LCA tem 'carência' de 90 dias?",
+        "options": [
+          "O banco pode cancelar o investimento após 90 dias",
+          "O investidor só começa a receber juros após 90 dias",
+          "O investidor não pode resgatar o dinheiro antes de completar 90 dias",
+          "O IR só é cobrado se o resgate ocorrer antes de 90 dias"
+        ],
+        "correct_index": 2,
+        "explanation": "A carência é o período mínimo que o dinheiro deve permanecer aplicado antes de poder ser resgatado. Em uma LCA com carência de 90 dias, o investidor não consegue sacar o valor investido antes desse prazo. Por isso, é importante aplicar na LCA apenas valores que não serão necessários nesse período."
+      }
+    ],
+    "sim_score_at_creation": 42.0,
+    "created_cycle": 1,
+    "mastered": false,
+    "requested_by_user": true,
+    "quiz_results": []
+  }
+]

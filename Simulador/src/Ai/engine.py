@@ -478,7 +478,9 @@ Seu debriefing deve obrigatoriamente conter:
             "score de quiz baixo (abaixo de 70)."
         )
 
-        prompt = f"""=== GERAÇÃO DE CONTEÚDO EDUCATIVO ===
+        prompt = f"""Gere conteúdo educativo de finanças seguindo as instruções abaixo e retorne SOMENTE o JSON solicitado.
+
+=== GERAÇÃO DE CONTEÚDO EDUCATIVO ===
 
 CONTEXTO DO USUÁRIO:
   Nome            : {name}
@@ -581,7 +583,9 @@ Retorne SOMENTE o JSON abaixo, sem texto adicional antes ou depois, sem markdown
             best_score = last_score = attempts = 0
             quiz_block = "  (nenhum quiz realizado ainda)"
 
-        prompt = f"""=== AVALIAÇÃO DE DOMÍNIO DO CONTEÚDO ===
+        prompt = f"""Avalie o domínio do conteúdo seguindo as instruções abaixo e retorne SOMENTE o JSON solicitado.
+
+=== AVALIAÇÃO DE DOMÍNIO DO CONTEÚDO ===
 
 TEMA AVALIADO: {topic}
 NÍVEL DO USUÁRIO: {knowledge_level}
@@ -739,7 +743,9 @@ Retorne SOMENTE o JSON abaixo, sem texto adicional:
         else:
             history_block = "  (primeira quest — sem histórico anterior)"
 
-        prompt = f"""=== ANÁLISE DE DESEMPENHO DA QUEST ===
+        prompt = f"""Analise o desempenho da quest seguindo as instruções abaixo e retorne SOMENTE o JSON solicitado.
+
+=== ANÁLISE DE DESEMPENHO DA QUEST ===
 
 QUEST: {q_title}
 TIPO: {q_type}
@@ -803,8 +809,8 @@ Retorne SOMENTE o JSON abaixo, sem texto adicional:
                              "monthly_income": float,
                              "monthly_expenses": float,
                              "monthly_surplus": float,
-                             "risk_profile": str,
-                             "knowledge_level": str,
+                             "risk_profile": str,      # declared at onboarding
+                             "knowledge_level": str,   # declared at onboarding
                              "goal": str,
                              "goal_amount": float,
                              "goal_deadline_months": int,
@@ -814,8 +820,12 @@ Retorne SOMENTE o JSON abaixo, sem texto adicional:
                              "completed_quests": int,
                              "main_weakness": str,
                              "last_quest_type": str,
-                             "inferred_risk": str,
-                             "inferred_level": str,
+                             "inferred_risk": str,          # AI-inferred, may differ from declared
+                             "inferred_level": str,         # AI-inferred, may differ from declared
+                             "recent_scores": list[int],    # last ≤5 quest scores
+                             "mastered_topics": list[str],  # topics the user has already mastered
+                             "portfolio_allocation": dict,  # {cash_pct, fixed_pct, stocks_pct}
+                             "current_net_worth": float,
                            }
 
         Returns the raw text response from Bob. Expected to be valid JSON:
@@ -851,52 +861,108 @@ Retorne SOMENTE o JSON abaixo, sem texto adicional:
         completed_quests = learning_context.get("completed_quests", 0)
         main_weakness    = learning_context.get("main_weakness", "não identificada")
         last_quest_type  = learning_context.get("last_quest_type", "nenhuma")
-        inferred_risk    = learning_context.get("inferred_risk", user_profile.get("risk_profile", "moderado"))
+        inferred_risk    = learning_context.get("inferred_risk",  user_profile.get("risk_profile",    "moderado"))
         inferred_level   = learning_context.get("inferred_level", user_profile.get("knowledge_level", "iniciante"))
+        recent_scores    = learning_context.get("recent_scores", [])
+        mastered_topics  = learning_context.get("mastered_topics", [])
+        alloc            = learning_context.get("portfolio_allocation", {})
+        current_nw       = learning_context.get("current_net_worth", 0.0)
 
-        score_line = f"Pontuação na última quest: {last_score}/100" if last_score is not None else "Pontuação: (primeira quest)"
-        difficulty_hint = (
-            "Aumente a dificuldade — o usuário está se saindo bem."
-            if last_score is not None and last_score >= 75
-            else "Mantenha dificuldade acessível — o usuário ainda está consolidando o aprendizado."
-            if last_score is not None and last_score < 50
-            else "Dificuldade moderada."
-        )
+        # ── score / difficulty line ───────────────────────────────────────────
+        if last_score is None:
+            score_line      = "Pontuação: (primeira quest)"
+            difficulty_hint = "É a primeira quest — use dificuldade introdutória e um objetivo simples e concreto."
+        elif last_score >= 75:
+            score_line      = f"Pontuação na última quest: {last_score}/100"
+            difficulty_hint = "O usuário está se saindo bem — aumente a dificuldade e introduza um conceito novo."
+        elif last_score < 50:
+            score_line      = f"Pontuação na última quest: {last_score}/100"
+            difficulty_hint = "O usuário está com dificuldade — mantenha acessível e reforce a fraqueza principal."
+        else:
+            score_line      = f"Pontuação na última quest: {last_score}/100"
+            difficulty_hint = "Desempenho moderado — mantenha dificuldade similar, foque na fraqueza principal."
 
-        prompt = f"""=== GERAÇÃO DE QUEST — TIPO: {quest_type.upper()} ===
+        # ── score trend ───────────────────────────────────────────────────────
+        if len(recent_scores) >= 2:
+            trend = recent_scores[-1] - recent_scores[0]
+            if trend > 10:
+                trend_line = f"Tendência de melhora nas últimas quests ({', '.join(map(str, recent_scores))})."
+            elif trend < -10:
+                trend_line = f"Tendência de queda nas últimas quests ({', '.join(map(str, recent_scores))}) — reforce conceitos básicos."
+            else:
+                trend_line = f"Desempenho estável ({', '.join(map(str, recent_scores))})."
+        elif len(recent_scores) == 1:
+            trend_line = f"Apenas uma quest concluída (score: {recent_scores[0]})."
+        else:
+            trend_line = "Nenhuma quest concluída ainda."
+
+        # ── mastered topics line ──────────────────────────────────────────────
+        if mastered_topics:
+            mastered_line = f"Já dominados (NÃO repetir como tema principal): {', '.join(mastered_topics)}."
+        else:
+            mastered_line = "Nenhum tema dominado ainda — qualquer foco educativo é válido."
+
+        # ── portfolio context ─────────────────────────────────────────────────
+        cash_pct   = alloc.get("cash_pct",   0.0)
+        fixed_pct  = alloc.get("fixed_pct",  0.0)
+        stocks_pct = alloc.get("stocks_pct", 0.0)
+        if current_nw > 0:
+            portfolio_line = (
+                f"Patrimônio atual: R$ {current_nw:,.2f} | "
+                f"Caixa: {cash_pct}% | Renda Fixa: {fixed_pct}% | Renda Variável: {stocks_pct}%"
+            )
+        else:
+            portfolio_line = "Portfólio ainda não iniciado."
+
+        prompt = f"""Gere uma quest de investimentos seguindo as instruções abaixo e retorne SOMENTE o JSON solicitado.
+
+=== GERAÇÃO DE QUEST — TIPO: {quest_type.upper()} ===
 
 REGRAS DO TIPO:
 {quest_type_rules}
 
-PERFIL DO USUÁRIO (INFERIDO PELO AGENTE):
-  Perfil de risco     : {inferred_risk}
-  Nível de conhecimento: {inferred_level}
-  Nome                : {name}
-  Renda mensal        : R$ {monthly_income:.2f}
-  Gastos fixos        : R$ {monthly_expenses:.2f}
-  Sobra mensal        : R$ {monthly_surplus:.2f}
-  Meta                : {goal}  (R$ {goal_amount:.2f} em {goal_deadline} meses)
+PERFIL DO USUÁRIO:
+  Nome                   : {name}
+  Perfil de risco inferido (pelo agente, use este): {inferred_risk}
+  Nível de conhecimento inferido (pelo agente, use este): {inferred_level}
+  (Perfil declarado no onboarding — apenas referência: risco={user_profile.get("risk_profile")}, nível={user_profile.get("knowledge_level")})
+  Renda mensal           : R$ {monthly_income:,.2f}
+  Gastos fixos mensais   : R$ {monthly_expenses:,.2f}
+  Sobra mensal para investir: R$ {monthly_surplus:,.2f}
+  Objetivo financeiro    : {goal}
+  Meta                   : R$ {goal_amount:,.2f} em {goal_deadline} meses
 
-CONTEXTO DE APRENDIZADO:
+ESTADO DO PORTFÓLIO:
+  {portfolio_line}
+
+HISTÓRICO DE APRENDIZADO:
   {score_line}
-  Quests concluídas   : {completed_quests}
-  Última quest        : {last_quest_type}
-  Principal fraqueza  : {main_weakness}
-  Orientação de dificuldade: {difficulty_hint}
+  {trend_line}
+  Quests concluídas      : {completed_quests}
+  Última quest (tipo)    : {last_quest_type}
+  Principal fraqueza identificada: {main_weakness}
+  {mastered_line}
+
+CALIBRAÇÃO DE DIFICULDADE:
+  {difficulty_hint}
 
 ---
-Gere a quest deste ciclo usando o perfil inferido (não o declarado) como base para calibrar dificuldade e foco educativo.
-Use a fraqueza principal para direcionar o tema educativo da quest.
+INSTRUÇÕES:
+- Calibre a dificuldade e o foco educativo usando o perfil INFERIDO (não o declarado).
+- Direcione o tema educativo da quest à fraqueza principal ({main_weakness}), a menos que ela já esteja nos tópicos dominados.
+- Reflita o estado real do portfólio: se o usuário está muito em caixa, incentive aplicação; se está muito concentrado em um ativo, incentive diversificação.
+- Defina metas numéricas realistas com base na sobra mensal de R$ {monthly_surplus:,.2f}.
+- NÃO repita como tema principal nenhum dos tópicos já dominados.
 
-Retorne SOMENTE o JSON abaixo, sem texto adicional:
+Retorne SOMENTE o JSON abaixo, sem texto adicional, sem markdown, sem comentários:
 
 {{
   "title": "<título narrativo curto e imersivo>",
-  "context": "<2-3 frases de cenário com tom narrativo>",
-  "objective": "<uma frase clara e mensurável>",
-  "victory_condition": "<critério objetivo em R$ ou %>",
-  "defeat_condition": "<o que configura falha — seja explícito>",
-  "initial_tip": "<1 dica educativa curta focada na fraqueza do usuário>"
+  "context": "<2-3 frases de cenário com tom narrativo e referência à situação real do usuário>",
+  "objective": "<uma frase clara e mensurável com valor em R$ ou % baseado no perfil>",
+  "victory_condition": "<critério objetivo em R$ ou % — use a sobra mensal como referência>",
+  "defeat_condition": "<o que configura falha — seja explícito e realista>",
+  "initial_tip": "<1 dica educativa curta focada na fraqueza '{main_weakness}' do usuário>"
 }}"""
 
         return self._bob.send_prompt(prompt)
