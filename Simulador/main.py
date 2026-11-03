@@ -52,7 +52,7 @@ import uuid
 from dataclasses import asdict
 from enum import Enum, auto
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import customtkinter as ctk
 
@@ -83,6 +83,107 @@ from src.Interfaces.studyPage import StudyPage
 # ─────────────────────────────────────────────────────────────────────────────
 # State enumeration — mirrors every node in states_ibm.json
 # ─────────────────────────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Profile inference stubs (full AI-driven inference implemented separately)
+# ─────────────────────────────────────────────────────────────────────────────
+
+from dataclasses import dataclass, field as _field
+
+
+@dataclass
+class ProfileInferenceEntry:
+    cycle: int
+    score: int
+    main_weakness: str
+    inferred_risk: str
+    inferred_level: str
+    reasoning: str = ""
+    applied: bool = False
+    confirmed_by_user: bool = False
+
+
+@dataclass
+class _InferenceState:
+    history: list[ProfileInferenceEntry] = _field(default_factory=list)
+    _silent_streak: int = 0
+    _confirm_streak: int = 0
+
+    def record(self, entry: ProfileInferenceEntry):
+        self.history.append(entry)
+
+    @property
+    def last_score(self) -> int:
+        return self.history[-1].score if self.history else 0
+
+    @property
+    def completed_quests(self) -> int:
+        return len(self.history)
+
+    @property
+    def main_weakness(self) -> str:
+        return self.history[-1].main_weakness if self.history else "não identificada"
+
+    def needs_confirmation(
+        self,
+        new_risk: str,
+        new_level: str,
+        current_risk: str,
+        current_level: str,
+    ) -> bool:
+        """Show confirmation dialog after 2 consecutive silent updates."""
+        return self._silent_streak >= 2
+
+    def mark_confirmed(self):
+        self._confirm_streak += 1
+        self._silent_streak = 0
+
+    def mark_silent_update(self):
+        self._silent_streak += 1
+
+
+class ProfileConfirmDialog(ctk.CTkToplevel):
+    """Minimal confirmation dialog for inferred profile changes."""
+
+    def __init__(
+        self,
+        master,
+        current_risk: str,
+        current_level: str,
+        inferred_risk: str,
+        inferred_level: str,
+        reasoning: str,
+        on_confirm: Callable,
+        on_reject: Callable,
+        **kwargs,
+    ):
+        super().__init__(master, **kwargs)
+        self.title("Atualizar Perfil?")
+        self.geometry("420x260")
+        self.resizable(False, False)
+
+        ctk.CTkLabel(
+            self,
+            text="O agente identificou mudanças no seu perfil:",
+            font=ctk.CTkFont(size=13, weight="bold"),
+        ).pack(pady=(20, 6), padx=24)
+
+        ctk.CTkLabel(
+            self,
+            text=(
+                f"Risco: {current_risk} → {inferred_risk}\n"
+                f"Nível: {current_level} → {inferred_level}\n\n"
+                f"{reasoning}"
+            ),
+            justify="left",
+            wraplength=370,
+        ).pack(padx=24, pady=(0, 16))
+
+        btn_frame = ctk.CTkFrame(self, fg_color="transparent")
+        btn_frame.pack(pady=(0, 20))
+        ctk.CTkButton(btn_frame, text="Confirmar", command=lambda: (on_confirm(), self.destroy())).pack(side="left", padx=8)
+        ctk.CTkButton(btn_frame, text="Ignorar",   command=lambda: (on_reject(),  self.destroy())).pack(side="left", padx=8)
+
 
 class AppState(Enum):
     INICIAL              = auto()   # i2zG1y6y6l51
@@ -165,6 +266,11 @@ class App(ctk.CTk):
         if self._profile is not None:
             self._engine = SimulatorEngine()
             self._engine.create_portfolio(self._profile, initial_cash=self._profile.monthly_surplus)
+
+        # ── inference state (tracks AI-inferred profile updates) ─────────────
+        self._inference_state = _InferenceState()
+        self._active_quest: dict = {}
+        self._quest_start_log_len: int = 0
 
         # ── current frame reference (for clean destroy) ───────────────────────
         self._current_frame: Optional[ctk.CTkFrame] = None
@@ -841,6 +947,217 @@ class App(ctk.CTk):
                 print(f"[STUDY] Tema '{content.topic}' marcado como dominado.")
         except Exception as e:
             print(f"[STUDY] Falha ao avaliar domínio via IA: {e}")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Quest generation & post-quest evaluation
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _generate_quest(self) -> dict:
+        """
+        Calls the AI engine to generate the next quest based on the inferred
+        profile. Returns a quest dict. Falls back to a safe hardcoded quest
+        if the AI call fails.
+        """
+        from src.Ai.engine import Engine as AiEngine
+        from src.Ai.bob import Bob
+
+        fallback = {
+            "title": "O Fundo de Emergência do Rei",
+            "context": (
+                "O reino enfrenta tempos incertos. O conselheiro real recomenda "
+                "que todo cidadão mantenha uma reserva segura antes de aventurar-se "
+                "nos mercados de capitais."
+            ),
+            "objective": (
+                f"Acumule R$ {(self._profile.monthly_expenses * 4):,.2f} "
+                "em ativos líquidos."
+                if self._profile else "Acumule uma reserva de emergência."
+            ),
+            "victory_condition": "Reserva de emergência ≥ 4 meses de despesas em ativos líquidos.",
+            "defeat_condition":  "Não atingir a meta no prazo do ciclo.",
+            "initial_tip": "Tesouro Selic e CDB de liquidez diária são ótimas opções para reserva.",
+            "type": "acumulação",
+        }
+
+        if not self._profile:
+            self._active_quest = fallback
+            return fallback
+
+        inf  = self._inference_state
+        profile_dict = {
+            "name":                  self._profile.name,
+            "monthly_income":        self._profile.monthly_income,
+            "monthly_expenses":      self._profile.monthly_expenses,
+            "monthly_surplus":       self._profile.monthly_surplus,
+            "risk_profile":          self._profile.risk_profile,
+            "knowledge_level":       self._profile.knowledge_level,
+            "goal":                  self._profile.goal,
+            "goal_amount":           self._profile.goal_amount,
+            "goal_deadline_months":  self._profile.goal_deadline_months,
+        }
+        learning_ctx = {
+            "last_score":       inf.last_score,
+            "completed_quests": inf.completed_quests,
+            "main_weakness":    inf.main_weakness,
+            "last_quest_type":  self._active_quest.get("type", "nenhuma"),
+            "inferred_risk":    self._profile.risk_profile,
+            "inferred_level":   self._profile.knowledge_level,
+        }
+
+        # alternate quest types: acumulação → sobrevivência → acumulação ...
+        q_type = (
+            "sobrevivência"
+            if inf.completed_quests % 3 == 2
+            else "acumulação"
+        )
+
+        try:
+            api_key = os.environ.get("BOBSHELL_API_KEY", "")
+            bob = Bob(email="", password=api_key)
+            bob.login()
+            ai  = AiEngine(bob)
+            raw = ai.generate_quest(
+                quest_type=q_type,
+                user_profile=profile_dict,
+                learning_context=learning_ctx,
+            )
+            data = json.loads(raw)
+            data.setdefault("type", q_type)
+            self._active_quest = data
+            return data
+        except Exception as e:
+            print(f"[QUEST] Falha ao gerar quest via IA: {e}")
+            self._active_quest = fallback
+            return fallback
+
+    def _evaluate_quest(self, portfolio, snap: dict) -> dict:
+        """
+        Sends quest actions + final snapshot to the AI for evaluation.
+        Records the resulting ProfileInferenceEntry.
+        Returns the parsed AI result dict (empty dict on failure).
+        """
+        from src.Ai.engine import Engine as AiEngine
+        from src.Ai.bob import Bob
+
+        if not self._profile or not portfolio:
+            return {}
+
+        # Only actions taken DURING this quest
+        actions = portfolio.transaction_log[self._quest_start_log_len:]
+
+        current_profile = {
+            "risk_profile":    self._profile.risk_profile,
+            "knowledge_level": self._profile.knowledge_level,
+            "goal":            self._profile.goal,
+            "monthly_surplus": self._profile.monthly_surplus,
+        }
+        history_dicts = [
+            {
+                "cycle":          e.cycle,
+                "score":          e.score,
+                "main_weakness":  e.main_weakness,
+                "inferred_risk":  e.inferred_risk,
+                "inferred_level": e.inferred_level,
+                "applied":        e.applied,
+            }
+            for e in self._inference_state.history
+        ]
+
+        try:
+            api_key = os.environ.get("BOBSHELL_API_KEY", "")
+            bob = Bob(email="", password=api_key)
+            bob.login()
+            ai  = AiEngine(bob)
+            raw = ai.analyze_quest_performance(
+                quest=self._active_quest,
+                actions=actions,
+                portfolio_snapshot=snap,
+                current_profile=current_profile,
+                inference_history=history_dicts,
+            )
+            data = json.loads(raw)
+
+            # normalise accent-free values from the AI
+            _risk_norm  = {"conservador": "conservador", "moderado": "moderado", "arrojado": "arrojado"}
+            _level_norm = {"iniciante": "iniciante", "intermediario": "intermediário",
+                           "intermediário": "intermediário", "avancado": "avançado", "avançado": "avançado"}
+            data["inferred_risk"]  = _risk_norm.get(data.get("inferred_risk", ""), self._profile.risk_profile)
+            data["inferred_level"] = _level_norm.get(data.get("inferred_level", ""), self._profile.knowledge_level)
+
+            # Record in inference history (not yet applied — pending confirmation decision)
+            score = min(max(int(data.get("score", 0)), 0), 100)
+            entry = ProfileInferenceEntry(
+                cycle=self._engine.market.cycle if self._engine else 0,
+                score=score,
+                main_weakness=data.get("main_weakness", "não identificada"),
+                inferred_risk=data["inferred_risk"],
+                inferred_level=data["inferred_level"],
+                reasoning=data.get("reasoning", ""),
+                applied=False,
+            )
+            self._inference_state.record(entry)
+            self._quest_scores.append(score)
+            return data
+        except Exception as e:
+            print(f"[QUEST] Falha ao avaliar quest via IA: {e}")
+            return {}
+
+    def _maybe_confirm_profile_update(self, ai_result: dict, on_done: Callable):
+        """
+        Decides whether to silently apply the inferred profile update or
+        show the confirmation dialog first. Calls on_done() when resolved.
+        """
+        if not ai_result or not self._profile:
+            on_done()
+            return
+
+        new_risk  = ai_result.get("inferred_risk",  self._profile.risk_profile)
+        new_level = ai_result.get("inferred_level", self._profile.knowledge_level)
+
+        no_change = (
+            new_risk  == self._profile.risk_profile
+            and new_level == self._profile.knowledge_level
+        )
+        if no_change:
+            on_done()
+            return
+
+        needs_confirm = self._inference_state.needs_confirmation(
+            new_risk=new_risk,
+            new_level=new_level,
+            current_risk=self._profile.risk_profile,
+            current_level=self._profile.knowledge_level,
+        )
+
+        def apply_update():
+            assert self._profile is not None
+            self._profile.risk_profile    = new_risk
+            self._profile.knowledge_level = new_level
+            # mark last entry as applied
+            if self._inference_state.history:
+                self._inference_state.history[-1].applied          = True
+                self._inference_state.history[-1].confirmed_by_user = needs_confirm
+            self._inference_state.mark_confirmed() if needs_confirm else self._inference_state.mark_silent_update()
+            on_done()
+
+        def reject_update():
+            self._inference_state.mark_confirmed()   # reset counter either way
+            on_done()
+
+        if needs_confirm:
+            dlg = ProfileConfirmDialog(
+                master=self,
+                current_risk=self._profile.risk_profile,
+                current_level=self._profile.knowledge_level,
+                inferred_risk=new_risk,
+                inferred_level=new_level,
+                reasoning=ai_result.get("reasoning", ""),
+                on_confirm=apply_update,
+                on_reject=reject_update,
+            )
+            dlg.grab_set()
+        else:
+            apply_update()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
