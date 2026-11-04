@@ -1,1 +1,2 @@
 Simulador/__pycache__/
+Readme.txt
