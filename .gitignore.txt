@@ -1,0 +1,1 @@
+Simulador/__pycache__/

@@ -175,6 +175,45 @@ class HubPage(ctk.CTkFrame):
         )
         card.grid(row=row, column=0, pady=(0, 10), sticky="ew")
 
+        # layout interno do card
+        inner = ctk.CTkFrame(card, fg_color="transparent")
+        inner.place(relx=0.0, rely=0.0, relwidth=1.0, relheight=1.0)
+        inner.grid_columnconfigure(1, weight=1)
+
+        # ícone
+        icon_lbl = ctk.CTkLabel(
+            inner,
+            text=icon,
+            font=ctk.CTkFont(size=28),
+            width=52,
+        )
+        icon_lbl.grid(row=0, column=0, rowspan=2, padx=(20, 12), pady=12)
+
+        # título
+        title_lbl = ctk.CTkLabel(
+            inner,
+            text=title,
+            font=ctk.CTkFont(size=15, weight="bold"),
+            anchor="w",
+        )
+        title_lbl.grid(row=0, column=1, padx=(0, 16), pady=(14, 1), sticky="w")
+
+        # subtítulo
+        subtitle_lbl = ctk.CTkLabel(
+            inner,
+            text=subtitle,
+            font=ctk.CTkFont(size=12),
+            text_color="gray70",
+            anchor="w",
+            wraplength=340,
+            justify="left",
+        )
+        subtitle_lbl.grid(row=1, column=1, padx=(0, 16), pady=(1, 14), sticky="w")
+
+        # Forward clicks on the overlay frame and its children to the button
+        for widget in (inner, icon_lbl, title_lbl, subtitle_lbl):
+            widget.bind("<Button-1>", lambda e: command())
+
 
 # -----------------------------------------------------------------------------
 # Execução standalone
