@@ -1,2 +1,4 @@
 Simulador/__pycache__/
+Simulador/src/__pycache__/
+Simulador/data/profiles/
 Readme.txt
