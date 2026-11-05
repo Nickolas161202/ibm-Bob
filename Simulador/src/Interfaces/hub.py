@@ -152,14 +152,25 @@ class HubPage(ctk.CTkFrame):
         """
         Renderiza um card-botão clicável com ícone, título e subtítulo.
         O card `accent=True` usa a cor de destaque do tema.
+
+        Implementado como CTkButton de texto vazio com anchor w, para garantir
+        que o command é disparado independentemente de onde o clique ocorra.
         """
+        fg  = ("#2b5f8c", "#1a3a5c") if accent else ("gray20", "gray17")
+        hov = ("#3a7ab8", "#2a5080") if accent else ("gray30", "gray25")
+
+        # O botão ocupa toda a largura e exibe o conteúdo textual diretamente.
+        # Usar um CTkButton com text formatado evita o problema de widgets
+        # filhos interceptando os eventos de clique.
         card = ctk.CTkButton(
             parent,
-            text="",
+            text=f"{icon}   {title}\n        {subtitle}",
+            font=ctk.CTkFont(size=14, weight="bold"),
             height=72,
             corner_radius=12,
-            fg_color=("#2b5f8c", "#1a3a5c") if accent else ("gray20", "gray17"),
-            hover_color=("#3a7ab8", "#2a5080") if accent else ("gray30", "gray25"),
+            fg_color=fg,
+            hover_color=hov,
+            anchor="w",
             command=command,
         )
         card.grid(row=row, column=0, pady=(0, 10), sticky="ew")

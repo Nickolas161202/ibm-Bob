@@ -16,3 +16,7 @@ build/
 # IDE
 .vscode/
 .idea/
+__pycache__/
+profiles/
+my_key.json
+Simulador/Readme.md
