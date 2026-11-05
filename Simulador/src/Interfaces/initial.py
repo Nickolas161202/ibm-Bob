@@ -52,10 +52,10 @@ class InitialPage(ctk.CTkFrame):
         self.welcome_label = ctk.CTkLabel(
             self,
             text=(
-                "Bem-vindo, aventureiro!\n\n"
+                "Bem-vindo!\n\n"
                 "Neste simulador você aprenderá a gerenciar seu portfólio,\n"
                 "investir em renda fixa e variável, e conquistar sua\n"
-                "independência financeira no Reino das Finanças."
+                "independência financeira!."
             ),
             font=ctk.CTkFont(size=14),
             justify="center",

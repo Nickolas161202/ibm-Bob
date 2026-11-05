@@ -47,7 +47,8 @@ class Engine:
         total_debt_payment = sum(item.get("monthly_payment", 0) for item in debts)
         net = total_income - total_outcome - total_debt_payment
 
-        prompt = f"""Você é um assistente educacional de finanças pessoais dentro de um simulador gamificado.
+        prompt = f"""Você é um assistente educacional de finanças pessoais dentro de um simulador gamificado. Neste ambiente,
+cada quest simula a passagem de tempo correspondente a um mês, leve isso em consideração ao gerar a quest.
 O usuário a seguir está iniciando uma sessão. Memorize este perfil — ele será a base para todas as suas avaliações, briefings e debriefings desta sessão.
 
 === PERFIL DO USUÁRIO ===
@@ -65,7 +66,7 @@ Dívidas (parcela total: R$ {total_debt_payment:.2f}/mês):
 Saldo livre estimado: R$ {net:.2f}/mês
 
 Com base neste perfil, calibre sua linguagem, nível de risco sugerido e expectativas de desempenho para este usuário.
-Aguarde as instruções da próxima etapa (briefing da quest)."""
+Aguarde as instruções da próxima etapa (briefing da quest). APENAS ARMAZENE OS DADOS RECEBIDOS, NÃO GERE NENHUMA RESPOSTA SEM SER SOLICITADO."""
         return self._bob.send_prompt(prompt)
 
     def send_simulator_context(self, context: dict) -> str:
@@ -302,7 +303,7 @@ Guarde-as para o debriefing — avalie a qualidade das escolhas em relação ao 
         self,
         quest_type: str,
         quest_objective: str,
-        objective_achieved: bool,
+        objective_achieved: float,
         cycle_result: dict,
     ) -> str:
         """
@@ -318,7 +319,8 @@ Guarde-as para o debriefing — avalie a qualidade das escolhas em relação ao 
         quest_objective   : the explicit objective text shown to the user at
                             the start of the cycle (e.g. "Acumule R$ 500 em
                             rendimentos sem investir em renda variável")
-        objective_achieved: whether the user met the quest objective
+        objective_achieved: 0.0–1.0 completion ratio.
+                            ≥ 0.75 → achieved, ≥ 0.33 → partial, < 0.33 → failed.
         cycle_result      : dict from SimulatorEngine.advance_cycle() converted
                             to dict, or any structure with the keys below.
 
@@ -336,7 +338,13 @@ Guarde-as para o debriefing — avalie a qualidade das escolhas em relação ao 
             "evento":      "Evento especial  (investimento específico requerido)",
         }.get(quest_type.lower(), quest_type)
 
-        objective_status = "✅ OBJETIVO CUMPRIDO" if objective_achieved else "❌ OBJETIVO NÃO CUMPRIDO"
+        pct = round(objective_achieved * 100)
+        if objective_achieved >= 0.75:
+            objective_status = f"✅ OBJETIVO CUMPRIDO  ({pct}%)"
+        elif objective_achieved >= 0.33:
+            objective_status = f"⚡ OBJETIVO PARCIALMENTE CUMPRIDO  ({pct}%)"
+        else:
+            objective_status = f"❌ OBJETIVO NÃO CUMPRIDO  ({pct}%)"
 
         # --- Cycle events ------------------------------------------------
         market_events = cycle_result.get("market_events", [])
@@ -643,7 +651,7 @@ Retorne SOMENTE o JSON abaixo, sem texto adicional:
                                "objective": str,
                                "victory_condition": str,
                                "defeat_condition": str,
-                               "objective_achieved": bool,
+                               "objective_achieved": float,   # kept for context; AI determines objective_score
                                "cycles_played": int,
                              }
         actions            : list of Portfolio.transaction_log dicts for this quest
@@ -675,10 +683,7 @@ Retorne SOMENTE o JSON abaixo, sem texto adicional:
         q_objective = quest.get("objective", "")
         q_victory   = quest.get("victory_condition", "")
         q_defeat    = quest.get("defeat_condition", "")
-        q_achieved  = quest.get("objective_achieved", False)
         q_cycles    = quest.get("cycles_played", 1)
-
-        result_label = "✅ OBJETIVO CUMPRIDO" if q_achieved else "❌ OBJETIVO NÃO CUMPRIDO"
 
         # ── Actions summary ──────────────────────────────────────────────────
         _labels = {
@@ -753,7 +758,6 @@ OBJETIVO: {q_objective}
 CONDIÇÃO DE VITÓRIA: {q_victory}
 CONDIÇÃO DE DERROTA: {q_defeat}
 DURAÇÃO: {q_cycles} ciclo(s)
-RESULTADO: {result_label}
 
 AÇÕES DO USUÁRIO NESTA QUEST:
 {actions_block}
@@ -777,11 +781,13 @@ Considere:
   - Se respeitou a reserva de emergência
   - Se agiu de forma coerente com o perfil declarado ou demonstrou comportamento diferente
   - Evolução em relação às inferências anteriores (se houver)
-
+  - Em que grau o usuário cumpriu o objetivo da quest (condição de vitória vs derrota). Caso o usuário não cumpra o solicitado,
+    Sua nota deve ser afetada drasticamente
 Retorne SOMENTE o JSON abaixo, sem texto adicional:
 
 {{
   "score": <0-100>,
+  "objective_score": <1-100, sua avaliação de 1 a 100 de quanto o usuário cumpriu o OBJETIVO específico desta quest. Considere: 1-24 = não cumprido, 25-75 = quase lá, 76-100 = cumprido>,
   "main_weakness": "<fraqueza principal em 1-3 palavras, ex: diversificacao, gestao_de_risco, liquidez>",
   "inferred_risk": "<conservador|moderado|arrojado>",
   "inferred_level": "<iniciante|intermediario|avancado>",
@@ -953,7 +959,7 @@ INSTRUÇÕES:
 - Reflita o estado real do portfólio: se o usuário está muito em caixa, incentive aplicação; se está muito concentrado em um ativo, incentive diversificação.
 - Defina metas numéricas realistas com base na sobra mensal de R$ {monthly_surplus:,.2f}.
 - NÃO repita como tema principal nenhum dos tópicos já dominados.
-
+-
 Retorne SOMENTE o JSON abaixo, sem texto adicional, sem markdown, sem comentários:
 
 {{

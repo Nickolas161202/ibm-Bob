@@ -29,7 +29,7 @@ class DebriefingPage(ctk.CTkFrame):
         stocks_pct: float = 0.0,
         cycles_played: int = 1,
         agent_feedback: str = "Bom trabalho! Continue investindo com disciplina.",
-        quest_completed: bool = False,
+        quest_score: int = 0,
         on_continue: Callable | None = None,
         **kwargs,
     ):
@@ -44,7 +44,8 @@ class DebriefingPage(ctk.CTkFrame):
             stocks_pct:       % em renda variável.
             cycles_played:    Número de ciclos/meses jogados.
             agent_feedback:   Mensagem textual do agente de IA.
-            quest_completed:  Se a quest do período foi concluída.
+            quest_score:      Pontuação de conclusão da quest definida pelo Agente (1–100).
+                              > 75  → concluída, 25–75 → quase lá, < 25 → falhou.
             on_continue:      Callback ao clicar em "Continuar".
         """
         super().__init__(master, **kwargs)
@@ -56,7 +57,7 @@ class DebriefingPage(ctk.CTkFrame):
         self._stocks_pct = stocks_pct
         self._cycles_played = cycles_played
         self._agent_feedback = agent_feedback
-        self._quest_completed = quest_completed
+        self._quest_score = quest_score
         self._on_continue = on_continue or (lambda: None)
         self._build()
 
@@ -64,11 +65,21 @@ class DebriefingPage(ctk.CTkFrame):
         self.grid_columnconfigure(0, weight=1)
 
         # ── Título ────────────────────────────────────────────────────────────
-        quest_badge = "  🏆 Quest Concluída!" if self._quest_completed else ""
+        if self._quest_score > 75:
+            quest_badge = "  🏆 Quest Concluída!"
+            badge_color = "#4caf50"
+        elif self._quest_score >= 25:
+            quest_badge = "  ⚡ Quase Lá!"
+            badge_color = "#f0a500"
+        else:
+            quest_badge = "  💀 Quest Falhou"
+            badge_color = "#e05c5c"
+
         ctk.CTkLabel(
             self,
             text=f"Relatório de Desempenho{quest_badge}",
             font=ctk.CTkFont(size=22, weight="bold"),
+            text_color=badge_color,
         ).grid(row=0, column=0, padx=40, pady=(44, 4))
 
         ctk.CTkLabel(
@@ -200,7 +211,7 @@ if __name__ == "__main__":
             "corretamente entre renda fixa e variável. Para o próximo mês, considere "
             "aumentar sua exposição ao Tesouro IPCA+ para proteger o poder de compra."
         ),
-        quest_completed=True,
+        quest_score=85,
         on_continue=lambda: print("Continuar..."),
         fg_color="transparent",
     ).pack(fill="both", expand=True)

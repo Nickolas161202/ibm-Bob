@@ -110,25 +110,142 @@ class AppState(Enum):
 # ─────────────────────────────────────────────────────────────────────────────
 
 _PROFILES_DIR = Path(__file__).parent / "data" / "profiles"
+_PROFILE_FILE  = _PROFILES_DIR / "profile.json"
+_PORTFOLIO_FILE = _PROFILES_DIR / "portfolio.json"
 
 
 def _save_profile(profile: InvestorProfile) -> Path:
-    """Serialise *profile* to ``data/profiles/<user_id>.json`` and return the path."""
+    """Serialise *profile* to ``data/profiles/profile.json``, overwriting any previous one."""
     _PROFILES_DIR.mkdir(parents=True, exist_ok=True)
-    path = _PROFILES_DIR / f"{profile.user_id}.json"
-    path.write_text(json.dumps(asdict(profile), indent=2, ensure_ascii=False), encoding="utf-8")
-    return path
+    # Remove any old per-user-id files left from a previous layout
+    for old in _PROFILES_DIR.glob("*.json"):
+        if old not in (_PROFILE_FILE, _PORTFOLIO_FILE):
+            old.unlink(missing_ok=True)
+    _PROFILE_FILE.write_text(json.dumps(asdict(profile), indent=2, ensure_ascii=False), encoding="utf-8")
+    return _PROFILE_FILE
 
 
 def _load_latest_profile() -> Optional[InvestorProfile]:
-    """Return the most recently saved InvestorProfile, or None if none exist."""
-    if not _PROFILES_DIR.exists():
+    """Return the single saved InvestorProfile, or None if it does not exist."""
+    if not _PROFILE_FILE.exists():
         return None
-    files = sorted(_PROFILES_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
-    if not files:
-        return None
-    data = json.loads(files[0].read_text(encoding="utf-8"))
+    data = json.loads(_PROFILE_FILE.read_text(encoding="utf-8"))
     return InvestorProfile(**data)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Portfolio persistence
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _save_portfolio(engine: "SimulatorEngine", profile: InvestorProfile) -> None:
+    """
+    Serialise the portfolio's mutable state to ``data/profiles/portfolio.json``.
+
+    Saves:
+      - cash
+      - fixed_positions  (enough to reconstruct each FixedIncomePosition)
+      - stock_positions   (enough to reconstruct each StockPosition)
+      - net_worth_history, cash_history
+      - transaction_log
+      - market cycle + SELIC (so earnings stay consistent on reload)
+    """
+    from src.Simulator.fixed_income import FixedIncomeType
+    portfolio = engine.portfolios.get(profile.user_id)
+    if portfolio is None:
+        return
+
+    fixed = []
+    for pos in portfolio.fixed_positions:
+        fixed.append({
+            "product_type":       pos.product.product_type.value,
+            "principal":          round(pos.principal, 6),
+            "purchase_cycle":     pos.purchase_cycle,
+            "locked_rate_annual": pos.locked_rate_annual,
+            "gross_earnings":     round(pos.gross_earnings, 6),
+            "cycles_held":        pos.cycles_held,
+        })
+
+    stocks = {}
+    for ticker, pos in portfolio.stock_positions.items():
+        stocks[ticker] = {
+            "shares":              round(pos.shares, 6),
+            "avg_purchase_price":  round(pos.avg_purchase_price, 6),
+            "total_invested":      round(pos.total_invested, 6),
+        }
+
+    data = {
+        "cash":               round(portfolio.cash, 6),
+        "fixed_positions":    fixed,
+        "stock_positions":    stocks,
+        "net_worth_history":  portfolio.net_worth_history,
+        "cash_history":       portfolio.cash_history,
+        "transaction_log":    portfolio.transaction_log,
+        "market_cycle":       engine.market.cycle,
+        "market_selic":       engine.market.selic_annual,
+        "deposit_done_cycle": -1,   # reset; App will repopulate
+    }
+
+    _PROFILES_DIR.mkdir(parents=True, exist_ok=True)
+    _PORTFOLIO_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _load_portfolio(engine: "SimulatorEngine", profile: InvestorProfile) -> int:
+    """
+    Restore the portfolio from ``data/profiles/portfolio.json`` into *engine*.
+    Returns the saved ``deposit_done_cycle`` value (default -1).
+
+    Must be called AFTER engine.create_portfolio() so the Portfolio object
+    already exists in engine.portfolios.
+    """
+    if not _PORTFOLIO_FILE.exists():
+        return -1
+
+    from src.Simulator.fixed_income import FixedIncomeType, PRODUCTS, FixedIncomePosition
+    from src.Simulator.variable_income import StockPosition
+
+    data = json.loads(_PORTFOLIO_FILE.read_text(encoding="utf-8"))
+    portfolio = engine.portfolios.get(profile.user_id)
+    if portfolio is None:
+        return -1
+
+    # Restore market state so rates are consistent
+    engine.market.cycle        = data.get("market_cycle", 0)
+    engine.market.selic_annual = data.get("market_selic", engine.market.selic_annual)
+
+    # Restore cash
+    portfolio.cash = data.get("cash", 0.0)
+
+    # Restore fixed income positions
+    portfolio.fixed_positions.clear()
+    for fp in data.get("fixed_positions", []):
+        ft = FixedIncomeType(fp["product_type"])
+        product = PRODUCTS[ft]
+        pos = FixedIncomePosition(
+            product=product,
+            principal=fp["principal"],
+            purchase_cycle=fp["purchase_cycle"],
+            locked_rate_annual=fp.get("locked_rate_annual"),
+        )
+        pos.gross_earnings = fp.get("gross_earnings", 0.0)
+        pos.cycles_held    = fp.get("cycles_held", 0)
+        portfolio.fixed_positions.append(pos)
+
+    # Restore stock positions
+    portfolio.stock_positions.clear()
+    for ticker, sp in data.get("stock_positions", {}).items():
+        portfolio.stock_positions[ticker] = StockPosition(
+            ticker=ticker,
+            shares=sp["shares"],
+            avg_purchase_price=sp["avg_purchase_price"],
+            total_invested=sp["total_invested"],
+        )
+
+    # Restore history + log
+    portfolio.net_worth_history = data.get("net_worth_history", [])
+    portfolio.cash_history      = data.get("cash_history", [])
+    portfolio.transaction_log   = data.get("transaction_log", [])
+
+    return data.get("deposit_done_cycle", -1)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -164,6 +281,8 @@ class App(ctk.CTk):
         if self._profile is not None:
             self._engine = SimulatorEngine()
             self._engine.create_portfolio(self._profile, initial_cash=self._profile.monthly_surplus)
+            # Restore saved portfolio state (overwrites the initial_cash if a save exists)
+            self._deposit_done_for_cycle = _load_portfolio(self._engine, self._profile)
 
         # ── profile inference state ───────────────────────────────────────────
         self._inference_state: ProfileInferenceState = ProfileInferenceState()
@@ -221,6 +340,7 @@ class App(ctk.CTk):
                 self._engine.create_portfolio(profile, initial_cash=profile.monthly_surplus)
                 self._salary_deposited = True   # initial cash counts as first deposit
                 _save_profile(profile)
+                _save_portfolio(self._engine, profile)
                 self._transition(AppState.HUB)
 
             return CreateProfilePage(
@@ -305,11 +425,11 @@ class App(ctk.CTk):
             self._run_in_background(
                 task=self._generate_quest,
                 on_done=_show_quest,
-                message="O Conselheiro Real está gerando sua próxima quest…",
+                message="Seu objetivo está sendo gerado.",
             )
             return LoadingPage(
                 master=self,
-                message="O Conselheiro Real está gerando sua próxima quest…",
+                message="Seu objetivo está sendo gerado.",
                 sub_message="Isso pode levar alguns segundos.",
                 fg_color="transparent",
             )
@@ -338,6 +458,8 @@ class App(ctk.CTk):
                 cash=snap.get("cash", 0.0),
                 net_worth=snap.get("net_worth", 0.0),
                 cycle=snap.get("cycle", 1),
+                fixed_positions=snap.get("fixed_positions", []),
+                stock_positions=snap.get("stock_positions", []),
                 on_low_risk=lambda: self._transition(AppState.LOW_RISK),
                 on_high_risk=lambda: self._transition(AppState.HIGH_RISK),
                 on_end_month=lambda: self._transition(AppState.DEBRIEFING),
@@ -360,8 +482,6 @@ class App(ctk.CTk):
                 if not self._engine or not p:
                     self._transition(AppState.SIMULATOR_MAIN)
                     return
-                # _build_fixed_products uses ftype.value as "key"; on_invest receives
-                # the product key (FixedIncomeType.value) passed by LowRiskInvestmentsPage
                 from src.Simulator.fixed_income import FixedIncomeType as _FIT
                 _label_to_type: dict[str, _FIT] = {ft.value: ft for ft in _FIT}
                 ft = _label_to_type.get(label)
@@ -371,6 +491,7 @@ class App(ctk.CTk):
                     return
                 try:
                     self._engine.buy_fixed(p, ft, amount)
+                    if self._profile: _save_portfolio(self._engine, self._profile)
                 except ValueError as exc:
                     print(f"[LOW RISK] Erro ao investir: {exc}")
                 self._transition(AppState.SIMULATOR_MAIN)
@@ -382,6 +503,7 @@ class App(ctk.CTk):
                     return
                 try:
                     self._engine.redeem_fixed(p, position_index)
+                    if self._profile: _save_portfolio(self._engine, self._profile)
                 except ValueError as exc:
                     print(f"[LOW RISK] Erro ao resgatar: {exc}")
                 self._transition(AppState.SIMULATOR_MAIN)
@@ -419,6 +541,7 @@ class App(ctk.CTk):
                     try:
                         self._engine.buy_stock(p, ticker, amount)
                         print(f"[HIGH RISK] Comprado R$ {amount:.2f} de {ticker}")
+                        if self._profile: _save_portfolio(self._engine, self._profile)
                     except Exception as e:
                         print(f"[HIGH RISK] Erro ao comprar: {e}")
                 self._transition(AppState.SIMULATOR_MAIN)
@@ -429,6 +552,7 @@ class App(ctk.CTk):
                     try:
                         proceeds = self._engine.sell_stock(p, ticker, shares)
                         print(f"[HIGH RISK] Vendido {shares} cotas de {ticker} → R$ {proceeds:.2f}")
+                        if self._profile: _save_portfolio(self._engine, self._profile)
                     except Exception as e:
                         print(f"[HIGH RISK] Erro ao vender: {e}")
                 self._transition(AppState.SIMULATOR_MAIN)
@@ -450,17 +574,6 @@ class App(ctk.CTk):
             snap = self._engine.snapshot(portfolio) if self._engine and portfolio else {}
             alloc = snap.get("allocation", {})
 
-            # Evaluate acumulação quest objective before requesting AI debriefing
-            if self._active_quest.get("type", "acumulação") == "acumulação":
-                ef = snap.get("emergency_fund", {})
-                goal_p = snap.get("goal_progress", {})
-                # Victory: emergency fund adequate OR net-worth gained vs quest start
-                start_nw = self._quest_start_snapshot.get("net_worth", 0.0)
-                current_nw = snap.get("net_worth", 0.0)
-                self._active_quest["objective_achieved"] = (
-                    ef.get("adequate", False) or current_nw > start_nw
-                )
-
             # Calculate net-worth change since last cycle
             nw = snap.get("net_worth", 0.0)
             history = portfolio.net_worth_history if portfolio else []
@@ -473,7 +586,8 @@ class App(ctk.CTk):
                     "Continue investindo com disciplina! "
                     "Mantenha sua reserva de emergência antes de buscar maior retorno.",
                 )
-                quest_completed = self._active_quest.get("objective_achieved", False)
+                # objective_score (1-100) is determined by the AI in analyze_quest_performance
+                quest_completed = min(max(int(ai_result.get("objective_score", 0)), 1), 100)
 
                 def on_continue():
                     self._maybe_confirm_profile_update(
@@ -491,7 +605,7 @@ class App(ctk.CTk):
                     stocks_pct=alloc.get("stocks_pct", 0.0),
                     cycles_played=snap.get("cycle", 1),
                     agent_feedback=feedback,
-                    quest_completed=quest_completed,
+                    quest_score=quest_completed,
                     on_continue=on_continue,
                     fg_color="transparent",
                 ))
@@ -514,6 +628,7 @@ class App(ctk.CTk):
             if self._engine:
                 result = self._engine.advance_cycle()
                 self._last_cycle_result = result
+                if self._profile: _save_portfolio(self._engine, self._profile)
             # Reset salary flag for the new cycle
             self._salary_deposited = False
 
@@ -545,94 +660,76 @@ class App(ctk.CTk):
         self._generate_quest()
         self._transition(AppState.QUEST_GENERATED)
 
-    def _check_quest_completed(self, snap: dict) -> bool:
-        """Simple heuristic: for accumulation quests, check if net worth grew."""
-        quest_type = self._active_quest.get("type", "acumulação")
-        start_nw   = self._quest_start_snapshot.get("net_worth", 0.0)
-        if quest_type == "acumulação":
-            return snap.get("net_worth", 0.0) > start_nw
-        if quest_type == "sobrevivência":
-            # Survival: net worth didn't drop below start
-            return snap.get("net_worth", 0.0) >= start_nw
-        return True  # event quests always count as attempted
-
     def _request_ai_debriefing(self, snap: dict, quest_completed: bool) -> str:
         """
         Calls the AI engine for a debriefing narrative.
         Returns a fallback string if the AI is unavailable.
         """
-        try:
-            api_key = os.environ.get("BOBSHELL_API_KEY", "")
-            from src.Ai.engine import Engine as AiEngine
-            from src.Ai.bob import Bob
-            bob = Bob(email="", password=api_key)
-            bob.login()
-            ai = AiEngine(bob)
+        # TODO: re-enable AI calls when testing is done
+        # try:
+        #     api_key = os.environ.get("BOBSHELL_API_KEY", "")
+        #     from src.Ai.engine import Engine as AiEngine
+        #     from src.Ai.bob import Bob
+        #     bob = Bob(email="", password=api_key)
+        #     bob.login()
+        #     ai = AiEngine(bob)
+        #     market_snap = self._engine.market_snapshot() if self._engine else {}
+        #     full_ctx = {**snap, **market_snap}
+        #     ai.send_simulator_context(full_ctx)
+        #     portfolio = self._current_portfolio()
+        #     actions = portfolio.transaction_log[-20:] if portfolio else []
+        #     ai.send_player_actions(actions, cycle=snap.get("cycle"))
+        #     cycle_result_dict = {}
+        #     if self._last_cycle_result:
+        #         cycle_result_dict = {
+        #             "cycle": self._last_cycle_result.cycle,
+        #             "market_events": self._last_cycle_result.market_events,
+        #             "stock_events": self._last_cycle_result.stock_events,
+        #             "portfolio_summaries": self._last_cycle_result.portfolio_summaries,
+        #         }
+        #     raw = ai.send_debriefing_request(
+        #         quest_type=self._active_quest.get("type", "acumulação"),
+        #         quest_objective=self._active_quest.get("objective", ""),
+        #         objective_achieved=quest_completed,
+        #         cycle_result=cycle_result_dict,
+        #     )
+        #     for line in raw.splitlines():
+        #         if "PONTUAÇÃO:" in line.upper():
+        #             try:
+        #                 score_str = line.upper().split("PONTUAÇÃO:")[-1].strip()
+        #                 score = int(score_str.split("/")[0].strip())
+        #                 self._quest_scores.append(score)
+        #             except (ValueError, IndexError):
+        #                 pass
+        #     return raw
+        # except Exception as e:
+        #     print(f"[DEBRIEFING] Falha ao obter feedback via IA: {e}")
 
-            # Send simulator context first
-            market_snap = self._engine.market_snapshot() if self._engine else {}
-            full_ctx = {**snap, **market_snap}
-            ai.send_simulator_context(full_ctx)
-
-            # Send player actions
-            portfolio = self._current_portfolio()
-            actions = portfolio.transaction_log[-20:] if portfolio else []
-            ai.send_player_actions(actions, cycle=snap.get("cycle"))
-
-            # Request debriefing
-            cycle_result_dict = {}
-            if self._last_cycle_result:
-                cycle_result_dict = {
-                    "cycle": self._last_cycle_result.cycle,
-                    "market_events": self._last_cycle_result.market_events,
-                    "stock_events": self._last_cycle_result.stock_events,
-                    "portfolio_summaries": self._last_cycle_result.portfolio_summaries,
-                }
-            raw = ai.send_debriefing_request(
-                quest_type=self._active_quest.get("type", "acumulação"),
-                quest_objective=self._active_quest.get("objective", ""),
-                objective_achieved=quest_completed,
-                cycle_result=cycle_result_dict,
-            )
-            # Extract the score for quest_scores tracking
-            for line in raw.splitlines():
-                if "PONTUAÇÃO:" in line.upper():
-                    try:
-                        score_str = line.upper().split("PONTUAÇÃO:")[-1].strip()
-                        score = int(score_str.split("/")[0].strip())
-                        self._quest_scores.append(score)
-                    except (ValueError, IndexError):
-                        pass
-            return raw
-
-        except Exception as e:
-            print(f"[DEBRIEFING] Falha ao obter feedback via IA: {e}")
-            alloc = snap.get("allocation", {})
-            fixed_pct = alloc.get("fixed_pct", 0.0)
-            stocks_pct = alloc.get("stocks_pct", 0.0)
-            cash_pct = alloc.get("cash_pct", 0.0)
-
-            if cash_pct > 60:
-                return (
-                    "Seu saldo em caixa está muito alto. "
-                    "Considere diversificar: aplique parte em Renda Fixa para ao menos "
-                    "proteger contra a inflação enquanto mantém sua reserva de emergência."
-                )
-            if fixed_pct == 0 and stocks_pct == 0:
-                return (
-                    "Nenhum investimento realizado este mês. "
-                    "Mesmo uma pequena aplicação em Tesouro Selic já protege seu dinheiro "
-                    "da inflação e constrói o hábito de investir."
-                )
-            if stocks_pct > 70:
-                return (
-                    "Alta concentração em renda variável. "
-                    "Diversifique com renda fixa para reduzir o risco total do portfólio."
-                )
+        alloc = snap.get("allocation", {})
+        fixed_pct = alloc.get("fixed_pct", 0.0)
+        stocks_pct = alloc.get("stocks_pct", 0.0)
+        cash_pct = alloc.get("cash_pct", 0.0)
+        if cash_pct > 60:
             return (
-                "Continue investindo com disciplina! "
-                "Mantenha sua reserva de emergência antes de buscar maior retorno."
+                "Seu saldo em caixa está muito alto. "
+                "Considere diversificar: aplique parte em Renda Fixa para ao menos "
+                "proteger contra a inflação enquanto mantém sua reserva de emergência."
             )
+        if fixed_pct == 0 and stocks_pct == 0:
+            return (
+                "Nenhum investimento realizado este mês. "
+                "Mesmo uma pequena aplicação em Tesouro Selic já protege seu dinheiro "
+                "da inflação e constrói o hábito de investir."
+            )
+        if stocks_pct > 70:
+            return (
+                "Alta concentração em renda variável. "
+                "Diversifique com renda fixa para reduzir o risco total do portfólio."
+            )
+        return (
+            "Continue investindo com disciplina! "
+            "Mantenha sua reserva de emergência antes de buscar maior retorno."
+        )
 
     # ─────────────────────────────────────────────────────────────────────────
     # Helpers
@@ -765,91 +862,82 @@ class App(ctk.CTk):
         Calls the AI engine to generate a new StudyContent and persists it.
         Falls back gracefully if the AI engine is not available.
         """
-        from src.Ai.engine import Engine as AiEngine
-        from src.Ai.bob import Bob
+        # TODO: re-enable AI calls when testing is done
+        # from src.Ai.engine import Engine as AiEngine
+        # from src.Ai.bob import Bob
+        # lib = self._ensure_study_library()
+        # profile_dict = { ... }
+        # try:
+        #     api_key = os.environ.get("BOB_API_KEY", "")
+        #     bob = Bob(email="", password=api_key)
+        #     bob.login()
+        #     ai = AiEngine(bob)
+        #     raw = ai.generate_study_content(...)
+        #     data = json.loads(raw)
+        #     lib.add(StudyContent(...))
+        # except Exception as e:
+        #     print(f"[STUDY] Falha ao gerar conteúdo via IA: {e}")
 
         lib = self._ensure_study_library()
-
-        profile_dict = {}
-        if self._profile:
-            profile_dict = {
-                "name": self._profile.name,
-                "knowledge_level": self._profile.knowledge_level,
-                "risk_profile": self._profile.risk_profile,
-                "goal": self._profile.goal,
-                "monthly_income": self._profile.monthly_income,
-                "monthly_expenses": self._profile.monthly_expenses,
-                "monthly_surplus": self._profile.monthly_surplus,
-                "goal_amount": self._profile.goal_amount,
-                "goal_deadline_months": self._profile.goal_deadline_months,
-            }
-
-        try:
-            api_key = os.environ.get("BOB_API_KEY", "")
-            bob = Bob(email="", password=api_key)
-            bob.login()
-            print("Oi")
-
-            ai = AiEngine(bob)
-            raw = ai.generate_study_content(
-                user_profile=profile_dict,
-                simulator_performance=self._simulator_performance(),
-                library_summary=lib.mastery_summary(),
-                requested_topic=requested_topic,
-            )
-            data = json.loads(raw)
-            content = StudyContent(
-                id=str(uuid.uuid4()),
-                topic=data["topic"],
-                source_text=data["source_text"],
-                adapted_text=data["adapted_text"],
-                quiz=[QuizQuestion(**q) for q in data.get("quiz", [])],
-                sim_score_at_creation=self._simulator_performance()["avg_score"],
-                created_cycle=self._engine.market.cycle if self._engine else 0,
-                requested_by_user=requested_topic is not None,
-            )
-            lib.add(content)
-        except Exception as e:
-            print(f"[STUDY] Falha ao gerar conteúdo via IA: {e}")
+        topic = requested_topic or "Reserva de Emergência"
+        content = StudyContent(
+            id=str(uuid.uuid4()),
+            topic=topic,
+            source_text=(
+                "A reserva de emergência é um valor guardado para cobrir imprevistos, "
+                "equivalente a 3–6 meses de despesas mensais."
+            ),
+            adapted_text=(
+                f"Pense na reserva de emergência como seu escudo financeiro! "
+                f"Guarde de 3 a 6 meses dos seus gastos em um lugar seguro e de fácil acesso, "
+                f"como o Tesouro Selic ou um CDB de liquidez diária."
+            ),
+            quiz=[
+                QuizQuestion(
+                    question="Qual é o tamanho ideal de uma reserva de emergência?",
+                    options=[
+                        "1 mês de despesas",
+                        "3 a 6 meses de despesas",
+                        "1 ano de renda",
+                        "Não é necessário ter reserva",
+                    ],
+                    correct_index=1,
+                    explanation="A reserva de emergência deve cobrir de 3 a 6 meses de despesas.",
+                )
+            ],
+            sim_score_at_creation=self._simulator_performance()["avg_score"],
+            created_cycle=self._engine.market.cycle if self._engine else 0,
+            requested_by_user=requested_topic is not None,
+        )
+        lib.add(content)
 
     def _evaluate_mastery(self, content_id: str):
         """
         After a quiz, asks the AI whether the topic has been mastered.
         Updates the library if mastered=True is returned.
         """
-        from src.Ai.engine import Engine as AiEngine
-        from src.Ai.bob import Bob
+        # TODO: re-enable AI calls when testing is done
+        # from src.Ai.engine import Engine as AiEngine
+        # from src.Ai.bob import Bob
+        # lib = self._ensure_study_library()
+        # content = lib.get_by_id(content_id)
+        # if content is None: return
+        # try:
+        #     api_key = os.environ.get("BOB_API_KEY", "")
+        #     ...
+        #     data = json.loads(raw)
+        #     if data.get("mastered"): lib.mark_mastered(content_id)
+        # except Exception as e:
+        #     print(f"[STUDY] Falha ao avaliar domínio via IA: {e}")
 
         lib = self._ensure_study_library()
         content = lib.get_by_id(content_id)
         if content is None:
             return
-
-        try:
-            api_key = os.environ.get("BOB_API_KEY", "")
-            bob = Bob(email="", password=api_key)
-            bob.login()
-            ai = AiEngine(bob)
-            quiz_dicts = [
-                {"cycle": r.cycle, "score": r.score,
-                 "correct": r.correct, "total": r.total}
-                for r in content.quiz_results
-            ]
-            raw = ai.evaluate_study_mastery(
-                topic=content.topic,
-                quiz_results=quiz_dicts,
-                simulator_performance=self._simulator_performance(),
-                knowledge_level=(
-                    self._profile.knowledge_level
-                    if self._profile else "iniciante"
-                ),
-            )
-            data = json.loads(raw)
-            if data.get("mastered"):
-                lib.mark_mastered(content_id)
-                print(f"[STUDY] Tema '{content.topic}' marcado como dominado.")
-        except Exception as e:
-            print(f"[STUDY] Falha ao avaliar domínio via IA: {e}")
+        # Static rule: mastered if last quiz score >= 75
+        if content.quiz_results and content.quiz_results[-1].score >= 75:
+            lib.mark_mastered(content_id)
+            print(f"[STUDY] Tema '{content.topic}' marcado como dominado (stub).")
 
     # ─────────────────────────────────────────────────────────────────────────
     # Quest generation & post-quest evaluation
@@ -940,39 +1028,26 @@ class App(ctk.CTk):
         _cycle_to_type = {0: "acumulação", 1: "acumulação", 2: "sobrevivência", 3: "evento"}
         q_type = _cycle_to_type[inf.completed_quests % 4]
 
-        try:
-            api_key = os.environ.get("BOB_API_KEY", "")
-            bob = Bob(email="", password=api_key)
-            bob.login()
-            ai  = AiEngine(bob)
+        # TODO: re-enable AI calls when testing is done
+        # try:
+        #     api_key = os.environ.get("BOB_API_KEY", "")
+        #     bob = Bob(email="", password=api_key)
+        #     bob.login()
+        #     ai = AiEngine(bob)
+        #     ai.initialize_session(...)
+        #     if portfolio and self._engine:
+        #         ai.send_simulator_context({**profile_dict, **self._engine.market_snapshot()})
+        #     raw = ai.generate_quest(quest_type=q_type, user_profile=profile_dict,
+        #                             learning_context=learning_ctx)
+        #     data = json.loads(raw)
+        #     data.setdefault("type", q_type)
+        #     self._active_quest = data
+        #     return data
+        # except Exception as e:
+        #     print(f"[QUEST] Falha ao gerar quest via IA: {e}")
 
-            # Give Bob the user's financial profile before quest generation
-            ai.initialize_session(
-                name=self._profile.name,
-                incomes=[{"source": "Renda mensal", "amount": self._profile.monthly_income}],
-                outcomes=[{"category": "Gastos fixos", "amount": self._profile.monthly_expenses}],
-                debts=[],
-            )
-
-            # Give Bob the current simulator/market state
-            if portfolio and self._engine:
-                market_snap = self._engine.market_snapshot()
-                merged_ctx = {**profile_dict, **market_snap}
-                ai.send_simulator_context(merged_ctx)
-
-            raw = ai.generate_quest(
-                quest_type=q_type,
-                user_profile=profile_dict,
-                learning_context=learning_ctx,
-            )
-            data = json.loads(raw)
-            data.setdefault("type", q_type)
-            self._active_quest = data
-            return data
-        except Exception as e:
-            print(f"[QUEST] Falha ao gerar quest via IA: {e}")
-            self._active_quest = fallback
-            return fallback
+        self._active_quest = fallback
+        return fallback
 
     def _evaluate_quest(self, portfolio, snap: dict) -> dict:
         """
@@ -1007,44 +1082,40 @@ class App(ctk.CTk):
             for e in self._inference_state.history
         ]
 
-        try:
-            api_key = os.environ.get("BOB_API_KEY", "")
-            bob = Bob(email="", password=api_key)
-            bob.login()
-            ai  = AiEngine(bob)
-            raw = ai.analyze_quest_performance(
-                quest=self._active_quest,
-                actions=actions,
-                portfolio_snapshot=snap,
-                current_profile=current_profile,
-                inference_history=history_dicts,
-            )
-            data = json.loads(raw)
+        # TODO: re-enable AI calls when testing is done
+        # try:
+        #     api_key = os.environ.get("BOB_API_KEY", "")
+        #     bob = Bob(email="", password=api_key)
+        #     bob.login()
+        #     ai = AiEngine(bob)
+        #     raw = ai.analyze_quest_performance(
+        #         quest=self._active_quest, actions=actions,
+        #         portfolio_snapshot=snap, current_profile=current_profile,
+        #         inference_history=history_dicts,
+        #     )
+        #     data = json.loads(raw)
+        #     ...normalise, record entry, append score...
+        #     return data
+        # except Exception as e:
+        #     print(f"[QUEST] Falha ao avaliar quest via IA: {e}")
+        #     return {}
 
-            # normalise accent-free values from the AI
-            _risk_norm  = {"conservador": "conservador", "moderado": "moderado", "arrojado": "arrojado"}
-            _level_norm = {"iniciante": "iniciante", "intermediario": "intermediário",
-                           "intermediário": "intermediário", "avancado": "avançado", "avançado": "avançado"}
-            data["inferred_risk"]  = _risk_norm.get(data.get("inferred_risk", ""), self._profile.risk_profile)
-            data["inferred_level"] = _level_norm.get(data.get("inferred_level", ""), self._profile.knowledge_level)
-
-            # Record in inference history (not yet applied — pending confirmation decision)
-            score = min(max(int(data.get("score", 0)), 0), 100)
-            entry = ProfileInferenceEntry(
-                cycle=self._engine.market.cycle if self._engine else 0,
-                score=score,
-                main_weakness=data.get("main_weakness", "não identificada"),
-                inferred_risk=data["inferred_risk"],
-                inferred_level=data["inferred_level"],
-                reasoning=data.get("reasoning", ""),
-                applied=False,
-            )
-            self._inference_state.record(entry)
-            self._quest_scores.append(score)
-            return data
-        except Exception as e:
-            print(f"[QUEST] Falha ao avaliar quest via IA: {e}")
-            return {}
+        # Static stub: fixed score + keep current profile values
+        score = 50
+        self._quest_scores.append(score)
+        return {
+            "score": score,
+            "objective_score": 50,
+            "summary": (
+                "Continue investindo com disciplina! "
+                "Mantenha sua reserva de emergência antes de buscar maior retorno."
+            ),
+            "main_weakness": "diversificação",
+            "inferred_risk": self._profile.risk_profile,
+            "inferred_level": self._profile.knowledge_level,
+            "reasoning": "Avaliação automática (modo de teste — IA desativada).",
+            "quest_tip": "Experimente diversificar entre renda fixa e variável.",
+        }
 
     def _maybe_confirm_profile_update(self, ai_result: dict, on_done: Callable):
         """
