@@ -732,7 +732,7 @@ class App(ctk.CTk):
             # Give Bob the current simulator/market state
             if portfolio and self._engine:
                 market_snap = self._engine.market_snapshot()
-                merged_ctx = {**snap, **market_snap}
+                merged_ctx = {**profile_dict, **market_snap}
                 ai.send_simulator_context(merged_ctx)
 
             raw = ai.generate_quest(
