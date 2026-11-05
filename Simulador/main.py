@@ -46,9 +46,11 @@ Diagrama de estados (states_ibm.json):
 from __future__ import annotations
 
 import json
+import json
 import os
 import sys
 import uuid
+from dataclasses import asdict
 from dataclasses import asdict
 from enum import Enum, auto
 from pathlib import Path
@@ -225,6 +227,7 @@ class App(ctk.CTk):
                 self._engine = SimulatorEngine()
                 self._engine.create_portfolio(profile, initial_cash=profile.monthly_surplus)
                 self._salary_deposited = True   # initial cash counts as first deposit
+                _save_profile(profile)
                 _save_profile(profile)
                 self._transition(AppState.HUB)
 
