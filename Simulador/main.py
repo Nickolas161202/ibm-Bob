@@ -48,10 +48,11 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
 from dataclasses import asdict
 from enum import Enum, auto
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 import customtkinter as ctk
 
@@ -82,6 +83,7 @@ from src.Interfaces.endOfMonth import EndOfMonthPage
 from src.Interfaces.hub import HubPage
 from src.Interfaces.studyPage import StudyPage
 from src.Interfaces.profileConfirm import ProfileConfirmDialog
+from src.Interfaces.loading import LoadingPage
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -275,26 +277,35 @@ class App(ctk.CTk):
 
         # ── QUEST_GENERATED ───────────────────────────────────────────────────
         if state == AppState.QUEST_GENERATED:
-            # Generate the quest via AI (falls back to hardcoded on failure)
-            quest_data = self._generate_quest()
+            def _show_quest(quest_data: dict):
+                def on_start():
+                    portfolio = self._current_portfolio()
+                    if self._engine and portfolio:
+                        self._quest_start_snapshot = self._engine.snapshot(portfolio)
+                        self._quest_start_log_len  = len(portfolio.transaction_log)
+                    self._transition(AppState.SIMULATOR_MAIN)
 
-            def on_start():
-                # Record the portfolio baseline so we can evaluate later
-                portfolio = self._current_portfolio()
-                if self._engine and portfolio:
-                    self._quest_start_snapshot = self._engine.snapshot(portfolio)
-                    self._quest_start_log_len  = len(portfolio.transaction_log)
-                self._transition(AppState.SIMULATOR_MAIN)
+                self._replace_loading(QuestGeneratedPage(
+                    master=self,
+                    quest_title=quest_data.get("title", "Nova Missão"),
+                    quest_description=(
+                        quest_data.get("context", "")
+                        + "\n\n💡  " + quest_data.get("initial_tip", "")
+                    ).strip(),
+                    quest_objective="🎯  " + quest_data.get("objective", ""),
+                    on_start=on_start,
+                    fg_color="transparent",
+                ))
 
-            return QuestGeneratedPage(
+            self._run_in_background(
+                task=self._generate_quest,
+                on_done=_show_quest,
+                message="O Conselheiro Real está gerando sua próxima quest…",
+            )
+            return LoadingPage(
                 master=self,
-                quest_title=quest_data.get("title", "Nova Missão"),
-                quest_description=(
-                    quest_data.get("context", "")
-                    + "\n\n💡  " + quest_data.get("initial_tip", "")
-                ).strip(),
-                quest_objective="🎯  " + quest_data.get("objective", ""),
-                on_start=on_start,
+                message="O Conselheiro Real está gerando sua próxima quest…",
+                sub_message="Isso pode levar alguns segundos.",
                 fg_color="transparent",
             )
 
@@ -359,34 +370,44 @@ class App(ctk.CTk):
             prev_nw = history[-2] if len(history) >= 2 else history[0] if history else nw
             change = nw - prev_nw
 
-            # ── Run post-quest AI evaluation (async-style: best-effort) ───────
-            ai_result = self._evaluate_quest(portfolio, snap)
-            feedback  = ai_result.get(
-                "summary",
-                "Continue investindo com disciplina! "
-                "Mantenha sua reserva de emergência antes de buscar maior retorno.",
-            )
-            quest_completed = self._active_quest.get("objective_achieved", False)
-
-            def on_continue():
-                # Show profile update confirmation if needed, then advance
-                self._maybe_confirm_profile_update(
-                    ai_result=ai_result,
-                    on_done=lambda: self._transition(AppState.END_MONTH),
+            def _show_debriefing(ai_result: dict):
+                feedback = ai_result.get(
+                    "summary",
+                    "Continue investindo com disciplina! "
+                    "Mantenha sua reserva de emergência antes de buscar maior retorno.",
                 )
+                quest_completed = self._active_quest.get("objective_achieved", False)
 
-            return DebriefingPage(
+                def on_continue():
+                    self._maybe_confirm_profile_update(
+                        ai_result=ai_result,
+                        on_done=lambda: self._transition(AppState.END_MONTH),
+                    )
+
+                self._replace_loading(DebriefingPage(
+                    master=self,
+                    player_name=self._profile.name if self._profile else "Aventureiro",
+                    net_worth=nw,
+                    net_worth_change=change,
+                    cash_pct=alloc.get("cash_pct", 0.0),
+                    fixed_pct=alloc.get("fixed_pct", 0.0),
+                    stocks_pct=alloc.get("stocks_pct", 0.0),
+                    cycles_played=snap.get("cycle", 1),
+                    agent_feedback=feedback,
+                    quest_completed=quest_completed,
+                    on_continue=on_continue,
+                    fg_color="transparent",
+                ))
+
+            self._run_in_background(
+                task=lambda: self._evaluate_quest(portfolio, snap),
+                on_done=_show_debriefing,
+                message="O Conselheiro Real está avaliando seu desempenho…",
+            )
+            return LoadingPage(
                 master=self,
-                player_name=self._profile.name if self._profile else "Aventureiro",
-                net_worth=nw,
-                net_worth_change=change,
-                cash_pct=alloc.get("cash_pct", 0.0),
-                fixed_pct=alloc.get("fixed_pct", 0.0),
-                stocks_pct=alloc.get("stocks_pct", 0.0),
-                cycles_played=snap.get("cycle", 1),
-                agent_feedback=feedback,
-                quest_completed=quest_completed,
-                on_continue=on_continue,
+                message="O Conselheiro Real está avaliando seu desempenho…",
+                sub_message="Aguarde enquanto seu relatório é preparado.",
                 fg_color="transparent",
             )
 
@@ -419,6 +440,45 @@ class App(ctk.CTk):
     # ─────────────────────────────────────────────────────────────────────────
     # Helpers
     # ─────────────────────────────────────────────────────────────────────────
+
+    def _run_in_background(
+        self,
+        task: Callable[[], Any],
+        on_done: Callable[[Any], None],
+        message: str = "Processando…",
+    ) -> None:
+        """
+        Executa *task* em uma thread separada para não bloquear a UI.
+        Quando a tarefa termina, agenda a chamada de *on_done(result)*
+        de volta no thread principal do Tkinter via `after()`.
+
+        Args:
+            task:     Função sem argumentos que retorna o resultado.
+            on_done:  Callback chamado no thread principal com o resultado.
+            message:  Texto de contexto (usado apenas para rastreabilidade).
+        """
+        def _worker():
+            try:
+                result = task()
+            except Exception as exc:
+                print(f"[BG] Erro em tarefa de background ({message}): {exc}")
+                result = {}
+            # Agenda a continuação no thread principal do Tkinter
+            self.after(0, lambda: on_done(result))
+
+        t = threading.Thread(target=_worker, daemon=True)
+        t.start()
+
+    def _replace_loading(self, new_frame: ctk.CTkFrame) -> None:
+        """
+        Substitui a tela de loading atual pelo *new_frame* fornecido.
+        Deve ser chamado apenas no thread principal do Tkinter (via after()).
+        """
+        if self._current_frame is not None:
+            self._current_frame.destroy()
+            self._current_frame = None
+        new_frame.pack(fill="both", expand=True)
+        self._current_frame = new_frame
 
     def _current_portfolio(self):
         """Returns the active Portfolio, or None if not yet created."""
