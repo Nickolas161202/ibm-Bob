@@ -46,11 +46,9 @@ Diagrama de estados (states_ibm.json):
 from __future__ import annotations
 
 import json
-import json
 import os
 import sys
 import uuid
-from dataclasses import asdict
 from dataclasses import asdict
 from enum import Enum, auto
 from pathlib import Path
@@ -221,7 +219,6 @@ class App(ctk.CTk):
                 self._engine.create_portfolio(profile, initial_cash=profile.monthly_surplus)
                 self._salary_deposited = True   # initial cash counts as first deposit
                 _save_profile(profile)
-                _save_profile(profile)
                 self._transition(AppState.HUB)
 
             return CreateProfilePage(
@@ -338,48 +335,49 @@ class App(ctk.CTk):
 
         # ── LOW_RISK ──────────────────────────────────────────────────────────
         if state == AppState.LOW_RISK:
-            # Build product list from engine for real data
-            _label_to_type: dict[str, FixedIncomeType] = {
-                ft.value: ft for ft in FixedIncomeType
-            }
+            portfolio = self._current_portfolio()
+            snap = self._engine.snapshot(portfolio) if self._engine and portfolio else {}
 
-            market_snap = self._engine.market_snapshot() if self._engine else {}
-            raw_products = market_snap.get("fixed_products", {})
-            products_for_ui = [
-                {
-                    "label": p["label"],
-                    "indexer": p.get("indexer", ""),
-                    "rate": p.get("description", ""),
-                    "maturity": (
-                        "Liquidez diária"
-                        if p.get("maturity_months", 0) == 0
-                        else f"{p['maturity_months']} meses"
-                    ),
-                    "min": f"R$ {p.get('min_investment', 0):,.2f}",
-                    "ir_exempt": p.get("ir_exempt", False),
-                }
-                for p in raw_products.values()
-            ] or None  # falls back to placeholders in the page
+            # Build product list using the engine's PRODUCTS catalogue + live rates
+            products_for_ui = self._build_fixed_products() or None
+
+            # Build open positions from the portfolio snapshot
+            open_positions = snap.get("fixed_positions", [])
 
             def on_invest(label: str, amount: float):
-                portfolio = self._current_portfolio()
-                if not self._engine or not portfolio:
+                p = self._current_portfolio()
+                if not self._engine or not p:
                     self._transition(AppState.SIMULATOR_MAIN)
                     return
+                # _build_fixed_products uses ftype.value as "key"; on_invest receives
+                # the product key (FixedIncomeType.value) passed by LowRiskInvestmentsPage
+                from src.Simulator.fixed_income import FixedIncomeType as _FIT
+                _label_to_type: dict[str, _FIT] = {ft.value: ft for ft in _FIT}
                 ft = _label_to_type.get(label)
                 if ft is None:
                     print(f"[LOW RISK] Produto desconhecido: {label}")
                     self._transition(AppState.SIMULATOR_MAIN)
                     return
                 try:
-                    self._engine.buy_fixed(portfolio, ft, amount)
+                    self._engine.buy_fixed(p, ft, amount)
                 except ValueError as exc:
                     print(f"[LOW RISK] Erro ao investir: {exc}")
                 self._transition(AppState.SIMULATOR_MAIN)
 
+            def on_redeem(position_index: int):
+                p = self._current_portfolio()
+                if not self._engine or not p:
+                    self._transition(AppState.SIMULATOR_MAIN)
+                    return
+                try:
+                    self._engine.redeem_fixed(p, position_index)
+                except ValueError as exc:
+                    print(f"[LOW RISK] Erro ao resgatar: {exc}")
+                self._transition(AppState.SIMULATOR_MAIN)
+
             return LowRiskInvestmentsPage(
                 master=self,
-                products=products,
+                products=products_for_ui,
                 open_positions=open_positions,
                 cash=snap.get("cash", 0.0),
                 on_invest=on_invest,
@@ -528,11 +526,13 @@ class App(ctk.CTk):
 
     def _check_quest_completed(self, snap: dict) -> bool:
         """Simple heuristic: for accumulation quests, check if net worth grew."""
-        if self._quest_type == "acumulação":
-            return snap.get("net_worth", 0.0) > self._quest_start_net_worth
-        if self._quest_type == "sobrevivência":
+        quest_type = self._active_quest.get("type", "acumulação")
+        start_nw   = self._quest_start_snapshot.get("net_worth", 0.0)
+        if quest_type == "acumulação":
+            return snap.get("net_worth", 0.0) > start_nw
+        if quest_type == "sobrevivência":
             # Survival: net worth didn't drop below start
-            return snap.get("net_worth", 0.0) >= self._quest_start_net_worth
+            return snap.get("net_worth", 0.0) >= start_nw
         return True  # event quests always count as attempted
 
     def _request_ai_debriefing(self, snap: dict, quest_completed: bool) -> str:
@@ -568,8 +568,8 @@ class App(ctk.CTk):
                     "portfolio_summaries": self._last_cycle_result.portfolio_summaries,
                 }
             raw = ai.send_debriefing_request(
-                quest_type=self._quest_type,
-                quest_objective=self._quest_objective,
+                quest_type=self._active_quest.get("type", "acumulação"),
+                quest_objective=self._active_quest.get("objective", ""),
                 objective_achieved=quest_completed,
                 cycle_result=cycle_result_dict,
             )
