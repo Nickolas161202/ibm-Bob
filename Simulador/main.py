@@ -84,6 +84,8 @@ from src.Interfaces.endOfMonth import EndOfMonthPage
 from src.Interfaces.hub import HubPage
 from src.Interfaces.studyPage import StudyPage
 from src.Interfaces.profileConfirm import ProfileConfirmDialog
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).parent / ".env")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -143,7 +145,7 @@ class App(ctk.CTk):
 
     def __init__(self):
         super().__init__()
-        self.title("Simulador de Investimentos — Reino das Finanças")
+        self.title("Simulador de Investimentos — Finvest")
         self.geometry("680x560")
         self.resizable(False, False)
 
@@ -151,17 +153,8 @@ class App(ctk.CTk):
         self._engine: Optional[SimulatorEngine] = None
         self._profile: Optional[InvestorProfile] = _load_latest_profile()
         self._last_cycle_result = None   # CycleResult from advance_cycle()
-
-        # ── quest state ───────────────────────────────────────────────────────
-        # Active quest data — reset each time a new quest is generated
-        self._quest_title: str = ""
-        self._quest_description: str = ""
-        self._quest_objective: str = ""
-        self._quest_type: str = "acumulação"   # "acumulação" | "sobrevivência" | "evento"
-        # Net worth at the moment the quest starts, for completion check
-        self._quest_start_net_worth: float = 0.0
-        # Whether the salary was already deposited for the current simulator session
-        self._salary_deposited: bool = False
+        # tracks whether the monthly deposit was already done for the current cycle
+        self._deposit_done_for_cycle: int = -1
 
         # ── study library (one instance per profile, loaded lazily) ───────────
         self._study_library: Optional[StudyLibrary] = None
@@ -315,18 +308,20 @@ class App(ctk.CTk):
 
         # ── SIMULATOR_MAIN ────────────────────────────────────────────────────
         if state == AppState.SIMULATOR_MAIN:
-            # Deposit monthly salary once per simulator session (new cycle)
-            if self._engine and self._profile and not self._salary_deposited:
-                portfolio = self._current_portfolio()
-                if portfolio:
-                    self._engine.deposit(
-                        portfolio,
-                        self._profile.monthly_surplus,
-                        note="Salário do mês",
-                    )
-                self._salary_deposited = True
-
             portfolio = self._current_portfolio()
+
+            # Deposit monthly surplus once per market cycle
+            if (
+                self._engine
+                and portfolio
+                and self._profile
+                and self._engine.market.cycle != self._deposit_done_for_cycle
+            ):
+                surplus = self._profile.monthly_surplus
+                if surplus > 0:
+                    self._engine.deposit(portfolio, surplus, note="Renda mensal")
+                self._deposit_done_for_cycle = self._engine.market.cycle
+
             snap = self._engine.snapshot(portfolio) if self._engine and portfolio else {}
 
             return MainPage(
@@ -343,37 +338,43 @@ class App(ctk.CTk):
 
         # ── LOW_RISK ──────────────────────────────────────────────────────────
         if state == AppState.LOW_RISK:
-            portfolio = self._current_portfolio()
-            snap = self._engine.snapshot(portfolio) if self._engine and portfolio else {}
+            # Build product list from engine for real data
+            _label_to_type: dict[str, FixedIncomeType] = {
+                ft.value: ft for ft in FixedIncomeType
+            }
 
-            # Build product list from real engine data
-            products = self._build_fixed_products()
+            market_snap = self._engine.market_snapshot() if self._engine else {}
+            raw_products = market_snap.get("fixed_products", {})
+            products_for_ui = [
+                {
+                    "label": p["label"],
+                    "indexer": p.get("indexer", ""),
+                    "rate": p.get("description", ""),
+                    "maturity": (
+                        "Liquidez diária"
+                        if p.get("maturity_months", 0) == 0
+                        else f"{p['maturity_months']} meses"
+                    ),
+                    "min": f"R$ {p.get('min_investment', 0):,.2f}",
+                    "ir_exempt": p.get("ir_exempt", False),
+                }
+                for p in raw_products.values()
+            ] or None  # falls back to placeholders in the page
 
-            # Build open positions list with index
-            open_positions = [
-                {**pos_snap, "index": i, "label": pos_snap.get("product", "—")}
-                for i, pos_snap in enumerate(snap.get("fixed_positions", []))
-            ]
-
-            def on_invest(product_key: str, amount: float):
-                p = self._current_portfolio()
-                if self._engine is not None and p is not None:
-                    try:
-                        ftype = FixedIncomeType(product_key)
-                        self._engine.buy_fixed(p, ftype, amount)
-                        print(f"[LOW RISK] Investido R$ {amount:.2f} em {product_key}")
-                    except Exception as e:
-                        print(f"[LOW RISK] Erro ao investir: {e}")
-                self._transition(AppState.SIMULATOR_MAIN)
-
-            def on_redeem(position_index: int):
-                p = self._current_portfolio()
-                if self._engine is not None and p is not None:
-                    try:
-                        redeemed = self._engine.redeem_fixed(p, position_index)
-                        print(f"[LOW RISK] Resgatado R$ {redeemed:.2f} (posição {position_index})")
-                    except Exception as e:
-                        print(f"[LOW RISK] Erro ao resgatar: {e}")
+            def on_invest(label: str, amount: float):
+                portfolio = self._current_portfolio()
+                if not self._engine or not portfolio:
+                    self._transition(AppState.SIMULATOR_MAIN)
+                    return
+                ft = _label_to_type.get(label)
+                if ft is None:
+                    print(f"[LOW RISK] Produto desconhecido: {label}")
+                    self._transition(AppState.SIMULATOR_MAIN)
+                    return
+                try:
+                    self._engine.buy_fixed(portfolio, ft, amount)
+                except ValueError as exc:
+                    print(f"[LOW RISK] Erro ao investir: {exc}")
                 self._transition(AppState.SIMULATOR_MAIN)
 
             return LowRiskInvestmentsPage(
@@ -439,6 +440,17 @@ class App(ctk.CTk):
             portfolio = self._current_portfolio()
             snap = self._engine.snapshot(portfolio) if self._engine and portfolio else {}
             alloc = snap.get("allocation", {})
+
+            # Evaluate acumulação quest objective before requesting AI debriefing
+            if self._active_quest.get("type", "acumulação") == "acumulação":
+                ef = snap.get("emergency_fund", {})
+                goal_p = snap.get("goal_progress", {})
+                # Victory: emergency fund adequate OR net-worth gained vs quest start
+                start_nw = self._quest_start_snapshot.get("net_worth", 0.0)
+                current_nw = snap.get("net_worth", 0.0)
+                self._active_quest["objective_achieved"] = (
+                    ef.get("adequate", False) or current_nw > start_nw
+                )
 
             # Calculate net-worth change since last cycle
             nw = snap.get("net_worth", 0.0)
@@ -713,9 +725,11 @@ class App(ctk.CTk):
             }
 
         try:
-            api_key = os.environ.get("BOBSHELL_API_KEY", "")
+            api_key = os.environ.get("BOB_API_KEY", "")
             bob = Bob(email="", password=api_key)
             bob.login()
+            print("Oi")
+
             ai = AiEngine(bob)
             raw = ai.generate_study_content(
                 user_profile=profile_dict,
@@ -752,7 +766,7 @@ class App(ctk.CTk):
             return
 
         try:
-            api_key = os.environ.get("BOBSHELL_API_KEY", "")
+            api_key = os.environ.get("BOB_API_KEY", "")
             bob = Bob(email="", password=api_key)
             bob.login()
             ai = AiEngine(bob)
@@ -824,27 +838,68 @@ class App(ctk.CTk):
             "goal_amount":           self._profile.goal_amount,
             "goal_deadline_months":  self._profile.goal_deadline_months,
         }
-        learning_ctx = {
-            "last_score":       inf.last_score,
-            "completed_quests": inf.completed_quests,
-            "main_weakness":    inf.main_weakness,
-            "last_quest_type":  self._active_quest.get("type", "nenhuma"),
-            "inferred_risk":    self._profile.risk_profile,
-            "inferred_level":   self._profile.knowledge_level,
-        }
+        # Use the latest AI-inferred risk/level from history; fall back to
+        # the declared profile values only when no inference exists yet.
+        last_inference = inf.history[-1] if inf.history else None
+        inferred_risk  = last_inference.inferred_risk  if last_inference else self._profile.risk_profile
+        inferred_level = last_inference.inferred_level if last_inference else self._profile.knowledge_level
 
-        # alternate quest types: acumulação → sobrevivência → acumulação ...
-        q_type = (
-            "sobrevivência"
-            if inf.completed_quests % 3 == 2
-            else "acumulação"
+        # Collect recent quest scores for trend analysis
+        recent_scores = [e.score for e in inf.history[-5:]] if inf.history else []
+
+        # Mastered topics from the study library (so Bob avoids repeating them)
+        lib = self._study_library
+        mastered_topics = (
+            [c.topic for c in lib.get_all() if c.mastered] if lib else []
         )
 
+        # Current portfolio allocation (so Bob can tailor the quest theme)
+        portfolio = self._current_portfolio()
+        if portfolio and self._engine:
+            snap = self._engine.snapshot(portfolio)
+            alloc = snap.get("allocation", {})
+            current_net_worth = snap.get("net_worth", 0.0)
+        else:
+            alloc = {}
+            current_net_worth = 0.0
+
+        learning_ctx = {
+            "last_score":           inf.last_score,
+            "completed_quests":     inf.completed_quests,
+            "main_weakness":        inf.main_weakness,
+            "last_quest_type":      self._active_quest.get("type", "nenhuma"),
+            "inferred_risk":        inferred_risk,
+            "inferred_level":       inferred_level,
+            "recent_scores":        recent_scores,
+            "mastered_topics":      mastered_topics,
+            "portfolio_allocation": alloc,
+            "current_net_worth":    current_net_worth,
+        }
+
+        # Quest-type rotation: acumulação → acumulação → sobrevivência → evento (every 4)
+        _cycle_to_type = {0: "acumulação", 1: "acumulação", 2: "sobrevivência", 3: "evento"}
+        q_type = _cycle_to_type[inf.completed_quests % 4]
+
         try:
-            api_key = os.environ.get("BOBSHELL_API_KEY", "")
+            api_key = os.environ.get("BOB_API_KEY", "")
             bob = Bob(email="", password=api_key)
             bob.login()
             ai  = AiEngine(bob)
+
+            # Give Bob the user's financial profile before quest generation
+            ai.initialize_session(
+                name=self._profile.name,
+                incomes=[{"source": "Renda mensal", "amount": self._profile.monthly_income}],
+                outcomes=[{"category": "Gastos fixos", "amount": self._profile.monthly_expenses}],
+                debts=[],
+            )
+
+            # Give Bob the current simulator/market state
+            if portfolio and self._engine:
+                market_snap = self._engine.market_snapshot()
+                merged_ctx = {**profile_dict, **market_snap}
+                ai.send_simulator_context(merged_ctx)
+
             raw = ai.generate_quest(
                 quest_type=q_type,
                 user_profile=profile_dict,
@@ -893,7 +948,7 @@ class App(ctk.CTk):
         ]
 
         try:
-            api_key = os.environ.get("BOBSHELL_API_KEY", "")
+            api_key = os.environ.get("BOB_API_KEY", "")
             bob = Bob(email="", password=api_key)
             bob.login()
             ai  = AiEngine(bob)
