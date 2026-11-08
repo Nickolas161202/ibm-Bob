@@ -1,11 +1,11 @@
 {
-  "user_id": "41e936a2-67b9-40e7-a700-82ffe96ff4c2",
-  "name": "500",
-  "monthly_income": 200.0,
-  "monthly_expenses": 20.0,
+  "user_id": "3722acc6-7551-49a1-a2ac-d4083b99895e",
+  "name": "perfil",
+  "monthly_income": 20000.0,
+  "monthly_expenses": 15000.0,
   "risk_profile": "conservador",
   "knowledge_level": "iniciante",
   "goal": "Independência financeira",
-  "goal_amount": 200.0,
+  "goal_amount": 100000.0,
   "goal_deadline_months": 12
 }

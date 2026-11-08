@@ -793,7 +793,8 @@ Retorne SOMENTE o JSON abaixo, sem texto adicional:
   "inferred_level": "<iniciante|intermediario|avancado>",
   "reasoning": "<2-3 frases justificando a inferência com base no comportamento observado>",
   "summary": "<2-3 frases de feedback direto ao usuário sobre o que fez bem e o que pode melhorar>",
-  "quest_tip": "<1 dica educativa curta e acionável para a próxima quest>"
+  "quest_tip": "<1 dica educativa curta e acionável para a próxima quest>",
+  "narrative": "<debriefing completo em 5 seções: 1. RESUMO DO DESEMPENHO — o que o usuário fez bem e mal considerando o tipo de quest; 2. ESTIMATIVA ÓTIMA — a estratégia que teria maximizado o resultado, com ativos e % específicos; 3. QUANTO FICOU NA MESA — diferença estimada em R$ entre resultado obtido e resultado ótimo; 4. PONTUAÇÃO: XX/100 — pontuação com os três critérios (objetivo, alocação, gestão de risco); 5. ORIENTAÇÃO PARA O PRÓXIMO CICLO — instrução educativa de 2-3 frases baseada no principal erro>"
 }}"""
 
         return self._bob.send_prompt(prompt)
@@ -873,6 +874,8 @@ Retorne SOMENTE o JSON abaixo, sem texto adicional:
         mastered_topics  = learning_context.get("mastered_topics", [])
         alloc            = learning_context.get("portfolio_allocation", {})
         current_nw       = learning_context.get("current_net_worth", 0.0)
+        goal_urgency     = learning_context.get("goal_urgency", {})
+        recent_behavior  = learning_context.get("recent_behavior", {})
 
         # ── score / difficulty line ───────────────────────────────────────────
         if last_score is None:
@@ -941,6 +944,20 @@ PERFIL DO USUÁRIO:
 ESTADO DO PORTFÓLIO:
   {portfolio_line}
 
+CONTEXTO DE META:
+  Meta financeira      : {goal_urgency.get("goal_amount", goal_amount):,.2f} R$
+  Progresso atual      : {goal_urgency.get("completion_pct", 0.0):.1f}%  (R$ {goal_urgency.get("current_net_worth", current_nw):,.2f} acumulados)
+  Meses restantes      : {goal_urgency.get("months_remaining", goal_deadline)}
+  Poupança necessária/mês: R$ {goal_urgency.get("required_monthly_saving", 0.0):,.2f}
+  Na trilha            : {"Sim — ritmo de poupança é suficiente" if goal_urgency.get("on_track") else "Não — usuário precisa poupar mais para atingir a meta no prazo"}
+
+COMPORTAMENTO RECENTE:
+  Ciclos analisados    : {recent_behavior.get("cycles_analyzed", 0)}
+  Operações realizadas : {recent_behavior.get("trade_count", 0)}
+  Ciclos entesourando  : {recent_behavior.get("cash_hoard_cycles", 0)} (caixa > 50% do patrimônio)
+  % média em caixa     : {recent_behavior.get("avg_cash_pct", 0.0):.1f}%
+  Classe dominante     : {recent_behavior.get("dominant_asset_class", "caixa")}
+
 HISTÓRICO DE APRENDIZADO:
   {score_line}
   {trend_line}
@@ -959,7 +976,8 @@ INSTRUÇÕES:
 - Reflita o estado real do portfólio: se o usuário está muito em caixa, incentive aplicação; se está muito concentrado em um ativo, incentive diversificação.
 - Defina metas numéricas realistas com base na sobra mensal de R$ {monthly_surplus:,.2f}.
 - NÃO repita como tema principal nenhum dos tópicos já dominados.
--
+- Use o CONTEXTO DE META para calibrar o valor objetivo da quest: se o usuário está atrasado (fora da trilha), aumente a urgência e o valor-alvo; se está adiantado, introduza mais complexidade.
+- Use o COMPORTAMENTO RECENTE para criar uma narrativa personalizada: referencie padrões detectados (ex: entesouramento, concentração, frequência de trades) na contextualização da quest.
 Retorne SOMENTE o JSON abaixo, sem texto adicional, sem markdown, sem comentários:
 
 {{

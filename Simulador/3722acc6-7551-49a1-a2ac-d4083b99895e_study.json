@@ -1,0 +1,50 @@
+[
+  {
+    "id": "6ae6c5f1-abd6-4e67-ad38-f963b2ff7b54",
+    "topic": "selic",
+    "source_text": "A reserva de emergência é um valor guardado para cobrir imprevistos, equivalente a 3–6 meses de despesas mensais.",
+    "adapted_text": "Pense na reserva de emergência como seu escudo financeiro! Guarde de 3 a 6 meses dos seus gastos em um lugar seguro e de fácil acesso, como o Tesouro Selic ou um CDB de liquidez diária.",
+    "quiz": [
+      {
+        "question": "Qual é o tamanho ideal de uma reserva de emergência?",
+        "options": [
+          "1 mês de despesas",
+          "3 a 6 meses de despesas",
+          "1 ano de renda",
+          "Não é necessário ter reserva"
+        ],
+        "correct_index": 1,
+        "explanation": "A reserva de emergência deve cobrir de 3 a 6 meses de despesas."
+      }
+    ],
+    "sim_score_at_creation": 0.0,
+    "created_cycle": 0,
+    "mastered": false,
+    "requested_by_user": true,
+    "quiz_results": []
+  },
+  {
+    "id": "676419e5-d942-4106-9a43-e2b193003334",
+    "topic": "asdfasdfa",
+    "source_text": "A reserva de emergência é um valor guardado para cobrir imprevistos, equivalente a 3–6 meses de despesas mensais.",
+    "adapted_text": "Pense na reserva de emergência como seu escudo financeiro! Guarde de 3 a 6 meses dos seus gastos em um lugar seguro e de fácil acesso, como o Tesouro Selic ou um CDB de liquidez diária.",
+    "quiz": [
+      {
+        "question": "Qual é o tamanho ideal de uma reserva de emergência?",
+        "options": [
+          "1 mês de despesas",
+          "3 a 6 meses de despesas",
+          "1 ano de renda",
+          "Não é necessário ter reserva"
+        ],
+        "correct_index": 1,
+        "explanation": "A reserva de emergência deve cobrir de 3 a 6 meses de despesas."
+      }
+    ],
+    "sim_score_at_creation": 78.0,
+    "created_cycle": 1,
+    "mastered": false,
+    "requested_by_user": true,
+    "quiz_results": []
+  }
+]

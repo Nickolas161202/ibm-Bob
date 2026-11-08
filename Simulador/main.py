@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import sys
 import uuid
 import threading
@@ -607,13 +608,38 @@ class App(ctk.CTk):
             change = nw - prev_nw
 
             def _show_debriefing(ai_result: dict):
-                feedback = ai_result.get(
+                # Prefer the rich 5-section narrative; fall back to summary
+                feedback = ai_result.get("narrative") or ai_result.get(
                     "summary",
                     "Continue investindo com disciplina! "
                     "Mantenha sua reserva de emergência antes de buscar maior retorno.",
                 )
                 # objective_score (1-100) is determined by the AI in analyze_quest_performance
                 quest_completed = min(max(int(ai_result.get("objective_score", 0)), 1), 100)
+
+                # ── Sub-Task 4: extract new fields for DebriefingPage ─────────
+                quest_tip = ai_result.get("quest_tip", "")
+                objective_score = ai_result.get("objective_score")
+                if objective_score is not None:
+                    objective_score = min(max(int(objective_score), 0), 100)
+
+                # Allocation score: good if cash < 40% and portfolio is diversified
+                cash_pct_val = alloc.get("cash_pct", 100.0)
+                fixed_pct_val = alloc.get("fixed_pct", 0.0)
+                stocks_pct_val = alloc.get("stocks_pct", 0.0)
+                alloc_ok = cash_pct_val < 40.0 and (fixed_pct_val + stocks_pct_val) > 30.0
+                allocation_score = 80 if alloc_ok else (50 if cash_pct_val < 60.0 else 25)
+
+                # Risk score: good if emergency fund ≥ 100%
+                ef_pct = snap.get("emergency_fund", {}).get("completion_pct", 0.0)
+                risk_score = 80 if ef_pct >= 100.0 else (50 if ef_pct >= 50.0 else 25)
+
+                # Goal progress fields
+                goal_p_snap = snap.get("goal_progress", {})
+                goal_name = self._profile.goal if self._profile else ""
+                goal_completion_pct = goal_p_snap.get("completion_pct", 0.0)
+                goal_amount = goal_p_snap.get("goal_amount", 0.0)
+                goal_remaining_r = max(0.0, goal_amount - nw)
 
                 def on_continue():
                     self._maybe_confirm_profile_update(
@@ -633,6 +659,13 @@ class App(ctk.CTk):
                     agent_feedback=feedback,
                     quest_score=quest_completed,
                     on_continue=on_continue,
+                    goal_name=goal_name,
+                    goal_completion_pct=goal_completion_pct,
+                    goal_remaining_r=goal_remaining_r,
+                    objective_score=objective_score,
+                    allocation_score=allocation_score,
+                    risk_score=risk_score,
+                    quest_tip=quest_tip,
                     fg_color="transparent",
                 ))
 
@@ -682,8 +715,7 @@ class App(ctk.CTk):
     # ─────────────────────────────────────────────────────────────────────────
 
     def _start_quest(self):
-        """Generate (or fall back to hardcoded) quest data, then transition."""
-        self._generate_quest()
+        """Transition to the quest screen; generation runs in the background."""
         self._transition(AppState.QUEST_GENERATED)
 
     def _request_ai_debriefing(self, snap: dict, quest_completed: bool) -> str:
@@ -786,8 +818,10 @@ class App(ctk.CTk):
             # Agenda a continuação no thread principal do Tkinter
             self.after(0, lambda: on_done(result))
 
-        t = threading.Thread(target=_worker, daemon=True)
-        t.start()
+        # Defer thread start by one event-loop tick so the loading page is
+        # fully packed and painted before the worker (which may finish almost
+        # instantly for sync stubs) schedules on_done back on the main thread.
+        self.after(50, lambda: threading.Thread(target=_worker, daemon=True).start())
 
     def _replace_loading(self, new_frame: ctk.CTkFrame) -> None:
         """
@@ -795,6 +829,11 @@ class App(ctk.CTk):
         Deve ser chamado apenas no thread principal do Tkinter (via after()).
         """
         if self._current_frame is not None:
+            # Stop the indeterminate progress-bar animation before destroying
+            # the frame so its pending after() callbacks don't keep firing
+            # against a dead widget and corrupt the Tkinter event queue.
+            if isinstance(self._current_frame, LoadingPage):
+                self._current_frame.stop()
             self._current_frame.destroy()
             self._current_frame = None
         new_frame.pack(fill="both", expand=True)
@@ -1034,8 +1073,67 @@ class App(ctk.CTk):
             alloc = snap.get("allocation", {})
             current_net_worth = snap.get("net_worth", 0.0)
         else:
+            snap = {}
             alloc = {}
             current_net_worth = 0.0
+
+        # ── Sub-Task 1: goal_urgency ──────────────────────────────────────────
+        goal_p = snap.get("goal_progress", {})
+        goal_amount = self._profile.goal_amount
+        goal_deadline = self._profile.goal_deadline_months
+        completed_months = snap.get("cycle", 0)
+        months_remaining = max(0, goal_deadline - completed_months)
+        completion_pct = goal_p.get("completion_pct", 0.0)
+        remaining_r = max(0.0, goal_amount - current_net_worth)
+        required_monthly = (remaining_r / months_remaining) if months_remaining > 0 else remaining_r
+        on_track = (required_monthly <= self._profile.monthly_surplus) if months_remaining > 0 else completion_pct >= 100.0
+        goal_urgency = {
+            "on_track":               on_track,
+            "months_remaining":       months_remaining,
+            "required_monthly_saving": round(required_monthly, 2),
+            "current_net_worth":      current_net_worth,
+            "goal_amount":            goal_amount,
+            "completion_pct":         completion_pct,
+        }
+
+        # ── Sub-Task 1: recent_behavior ───────────────────────────────────────
+        market_cycle = snap.get("cycle", 0)
+        cutoff_cycle = max(0, market_cycle - 2)
+        recent_actions = [
+            e for e in (portfolio.transaction_log if portfolio else [])
+            if e.get("cycle", 0) >= cutoff_cycle
+        ]
+        trade_actions = {"buy_fixed", "redeem_fixed", "buy_stock", "sell_stock"}
+        trade_count = sum(1 for e in recent_actions if e.get("action") in trade_actions)
+        cash_history_slice = (portfolio.cash_history[-3:] if portfolio and portfolio.cash_history else [])
+        total_nw_slices = [portfolio.net_worth_history[i] for i in range(
+            max(0, len(portfolio.net_worth_history) - 3), len(portfolio.net_worth_history)
+        )] if portfolio else []
+        avg_cash_pct = 0.0
+        if cash_history_slice and total_nw_slices:
+            pairs = zip(cash_history_slice, total_nw_slices)
+            cash_pcts = [c / nw * 100 if nw > 0 else 100.0 for c, nw in pairs]
+            avg_cash_pct = round(sum(cash_pcts) / len(cash_pcts), 1)
+        cash_hoard_cycles = sum(
+            1 for c, nw in zip(cash_history_slice, total_nw_slices)
+            if nw > 0 and (c / nw) > 0.5
+        )
+        # Determine dominant asset class from recent buys
+        class_counts: dict = {}
+        for e in recent_actions:
+            action = e.get("action", "")
+            if action in ("buy_fixed", "redeem_fixed"):
+                class_counts["renda_fixa"] = class_counts.get("renda_fixa", 0) + 1
+            elif action in ("buy_stock", "sell_stock"):
+                class_counts["renda_variavel"] = class_counts.get("renda_variavel", 0) + 1
+        dominant_asset_class = max(class_counts, key=lambda k: class_counts[k]) if class_counts else "caixa"
+        recent_behavior = {
+            "cycles_analyzed":    min(3, market_cycle + 1),
+            "trade_count":        trade_count,
+            "cash_hoard_cycles":  cash_hoard_cycles,
+            "avg_cash_pct":       avg_cash_pct,
+            "dominant_asset_class": dominant_asset_class,
+        }
 
         learning_ctx = {
             "last_score":           inf.last_score,
@@ -1048,29 +1146,42 @@ class App(ctk.CTk):
             "mastered_topics":      mastered_topics,
             "portfolio_allocation": alloc,
             "current_net_worth":    current_net_worth,
+            "goal_urgency":         goal_urgency,
+            "recent_behavior":      recent_behavior,
         }
 
-        # Quest-type rotation: acumulação → acumulação → sobrevivência → evento (every 4)
-        _cycle_to_type = {0: "acumulação", 1: "acumulação", 2: "sobrevivência", 3: "evento"}
-        q_type = _cycle_to_type[inf.completed_quests % 4]
+        # Quest type chosen randomly among the three types
+        q_type = random.choice(["acumulação", "sobrevivência", "evento"])
 
-        # TODO: re-enable AI calls when testing is done
-        # try:
-        #     api_key = os.environ.get("BOB_API_KEY", "")
-        #     bob = Bob(email="", password=api_key)
-        #     bob.login()
-        #     ai = AiEngine(bob)
-        #     ai.initialize_session(...)
-        #     if portfolio and self._engine:
-        #         ai.send_simulator_context({**profile_dict, **self._engine.market_snapshot()})
-        #     raw = ai.generate_quest(quest_type=q_type, user_profile=profile_dict,
-        #                             learning_context=learning_ctx)
-        #     data = json.loads(raw)
-        #     data.setdefault("type", q_type)
-        #     self._active_quest = data
-        #     return data
-        # except Exception as e:
-        #     print(f"[QUEST] Falha ao gerar quest via IA: {e}")
+        try:
+            api_key = os.environ.get("BOB_API_KEY", "")
+            bob = Bob(email="", password=api_key)
+            bob.login()
+            ai = AiEngine(bob)
+            ai.initialize_session(
+                name=self._profile.name,
+                incomes=[{"source": "Renda mensal", "amount": self._profile.monthly_income}],
+                outcomes=[{"category": "Gastos fixos", "amount": self._profile.monthly_expenses}],
+                debts=[],
+            )
+            if portfolio and self._engine:
+                # Merge the full portfolio snapshot (cash, net_worth, positions,
+                # allocation, emergency_fund, goal_progress) with the market
+                # snapshot (selic, inflation, available stocks and fixed products)
+                # so the agent sees the real cash on hand when crafting the quest.
+                full_ctx = {**snap, **self._engine.market_snapshot()}
+                ai.send_simulator_context(full_ctx)
+            raw = ai.generate_quest(
+                quest_type=q_type,
+                user_profile=profile_dict,
+                learning_context=learning_ctx,
+            )
+            data = json.loads(raw)
+            data.setdefault("type", q_type)
+            self._active_quest = data
+            return data
+        except Exception as e:
+            print(f"[QUEST] Falha ao gerar quest via IA: {e}")
 
         self._active_quest = fallback
         return fallback
@@ -1108,25 +1219,70 @@ class App(ctk.CTk):
             for e in self._inference_state.history
         ]
 
-        # TODO: re-enable AI calls when testing is done
-        # try:
-        #     api_key = os.environ.get("BOB_API_KEY", "")
-        #     bob = Bob(email="", password=api_key)
-        #     bob.login()
-        #     ai = AiEngine(bob)
-        #     raw = ai.analyze_quest_performance(
-        #         quest=self._active_quest, actions=actions,
-        #         portfolio_snapshot=snap, current_profile=current_profile,
-        #         inference_history=history_dicts,
-        #     )
-        #     data = json.loads(raw)
-        #     ...normalise, record entry, append score...
-        #     return data
-        # except Exception as e:
-        #     print(f"[QUEST] Falha ao avaliar quest via IA: {e}")
-        #     return {}
+        # ── Sub-Task 2: AI quest evaluation ──────────────────────────────────
+        # Use last-3-cycles window, same as the behavioural summary
+        current_cycle = snap.get("cycle", 0)
+        cutoff = max(0, current_cycle - 2)
+        actions = [
+            e for e in portfolio.transaction_log
+            if e.get("cycle", 0) >= cutoff
+        ]
 
-        # Static stub: fixed score + keep current profile values
+        try:
+            api_key = os.environ.get("BOB_API_KEY", "")
+            bob = Bob(email="", password=api_key)
+            bob.login()
+            ai = AiEngine(bob)
+            raw = ai.analyze_quest_performance(
+                quest=self._active_quest,
+                actions=actions,
+                portfolio_snapshot=snap,
+                current_profile=current_profile,
+                inference_history=history_dicts,
+            )
+            data = json.loads(raw)
+
+            # Normalise numeric scores to int 0–100
+            score = min(max(int(data.get("score", 50)), 0), 100)
+            obj_score = min(max(int(data.get("objective_score", 50)), 0), 100)
+            data["score"] = score
+            data["objective_score"] = obj_score
+
+            # Validate enum fields; fall back to current profile on invalid values
+            _valid_risk  = {"conservador", "moderado", "arrojado"}
+            _valid_level = {"iniciante", "intermediário", "avançado"}
+            if data.get("inferred_risk") not in _valid_risk:
+                data["inferred_risk"] = self._profile.risk_profile
+            if data.get("inferred_level") not in _valid_level:
+                data["inferred_level"] = self._profile.knowledge_level
+
+            # Fill any missing keys with safe defaults
+            data.setdefault("summary", (
+                "Continue investindo com disciplina! "
+                "Mantenha sua reserva de emergência antes de buscar maior retorno."
+            ))
+            data.setdefault("main_weakness", "diversificação")
+            data.setdefault("reasoning", "")
+            data.setdefault("quest_tip", "Experimente diversificar entre renda fixa e variável.")
+            data.setdefault("narrative", "")
+
+            # Record inference entry
+            entry = ProfileInferenceEntry(
+                cycle=current_cycle,
+                score=score,
+                main_weakness=data["main_weakness"],
+                inferred_risk=data["inferred_risk"],
+                inferred_level=data["inferred_level"],
+                reasoning=data["reasoning"],
+            )
+            self._inference_state.record(entry)
+            self._quest_scores.append(score)
+            return data
+
+        except Exception as e:
+            print(f"[QUEST] Falha ao avaliar quest via IA: {e}")
+
+        # Static stub fallback
         score = 50
         self._quest_scores.append(score)
         return {
