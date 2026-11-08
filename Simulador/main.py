@@ -82,6 +82,7 @@ from src.Interfaces.debriefing import DebriefingPage
 from src.Interfaces.endOfMonth import EndOfMonthPage
 from src.Interfaces.hub import HubPage
 from src.Interfaces.studyPage import StudyPage
+from src.Interfaces.editIncome import EditIncomePage
 from src.Interfaces.profileConfirm import ProfileConfirmDialog
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent / ".env")
@@ -96,6 +97,7 @@ class AppState(Enum):
     INICIAL              = auto()   # i2zG1y6y6l51
     CREATE_PROFILE       = auto()   # u2zG367~7dvM
     HUB                  = auto()   # menu principal pós-onboarding
+    EDIT_PROFILE         = auto()   # edição de nome/renda/gastos
     STUDY                = auto()   # biblioteca de estudos
     QUEST_GENERATED      = auto()   # B2zGtmQY~6EB
     SIMULATOR_MAIN       = auto()   # K3zGYcP4SeMW
@@ -264,7 +266,7 @@ class App(ctk.CTk):
         super().__init__()
         self.title("Simulador de Investimentos — Finvest")
         self.geometry("680x560")
-        self.resizable(False, False)
+        self.resizable(True, True)
 
         # ── simulator state ───────────────────────────────────────────────────
         self._engine: Optional[SimulatorEngine] = None
@@ -361,7 +363,27 @@ class App(ctk.CTk):
                 net_worth=snap.get("net_worth", 0.0),
                 on_missions=lambda: self._start_quest(),
                 on_study=lambda: self._transition(AppState.STUDY),
-                on_reconfigure=lambda: self._transition(AppState.CREATE_PROFILE),
+                on_reconfigure=lambda: self._transition(AppState.EDIT_PROFILE),
+                fg_color="transparent",
+            )
+
+        # ── EDIT_PROFILE ──────────────────────────────────────────────────────
+        if state == AppState.EDIT_PROFILE:
+            assert self._profile is not None  # only reachable from HUB which requires a profile
+            _profile = self._profile
+
+            def on_edit_save(name: str, income: float, expenses: float):
+                _profile.name = name
+                _profile.monthly_income = income
+                _profile.monthly_expenses = expenses
+                _save_profile(_profile)
+                self._transition(AppState.HUB)
+
+            return EditIncomePage(
+                master=self,
+                profile=_profile,
+                on_save=on_edit_save,
+                on_cancel=lambda: self._transition(AppState.HUB),
                 fg_color="transparent",
             )
 
@@ -460,6 +482,7 @@ class App(ctk.CTk):
                 cycle=snap.get("cycle", 1),
                 fixed_positions=snap.get("fixed_positions", []),
                 stock_positions=snap.get("stock_positions", []),
+                active_quest=self._active_quest or None,
                 on_low_risk=lambda: self._transition(AppState.LOW_RISK),
                 on_high_risk=lambda: self._transition(AppState.HIGH_RISK),
                 on_end_month=lambda: self._transition(AppState.DEBRIEFING),
@@ -475,7 +498,10 @@ class App(ctk.CTk):
             products_for_ui = self._build_fixed_products() or None
 
             # Build open positions from the portfolio snapshot
-            open_positions = snap.get("fixed_positions", [])
+            open_positions = [
+                {**pos, "index": i, "label": pos.get("label", pos.get("product", ""))}
+                for i, pos in enumerate(snap.get("fixed_positions", []))
+            ]
 
             def on_invest(label: str, amount: float):
                 p = self._current_portfolio()

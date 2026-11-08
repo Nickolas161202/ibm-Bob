@@ -15,24 +15,25 @@ import customtkinter as ctk
 """
 editIncome.py
 -------------
-Tela de edição de renda do usuário.
+Tela de edição de perfil do usuário.
 
-Permite ao jogador atualizar sua renda mensal e seus gastos mensais sem
+Permite ao jogador atualizar seu nome, renda mensal e gastos mensais sem
 precisar recriar o perfil inteiro. Após salvar, o saldo mensal disponível
 para investimento (monthly_surplus) é recalculado automaticamente.
 
 Campos exibidos:
+  - Nome
   - Renda mensal (monthly_income)
   - Gastos mensais (monthly_expenses)
 """
 class EditIncomePage(ctk.CTkFrame):
-    """Frame de edição de renda — atualiza income e expenses do perfil."""
+    """Frame de edição de perfil — atualiza nome, income e expenses do perfil."""
 
     def __init__(
         self,
         master,
         profile: InvestorProfile,
-        on_save: Callable[[float, float], None],
+        on_save: Callable[[str, float, float], None],
         on_cancel: Callable | None = None,
         **kwargs,
     ):
@@ -40,7 +41,7 @@ class EditIncomePage(ctk.CTkFrame):
         Args:
             master:     Widget pai.
             profile:    Perfil atual do investidor (usado como valores iniciais).
-            on_save:    Callback chamado com (nova_renda, novos_gastos) ao salvar.
+            on_save:    Callback chamado com (novo_nome, nova_renda, novos_gastos) ao salvar.
             on_cancel:  Callback chamado ao cancelar (volta para a tela anterior).
         """
         super().__init__(master, **kwargs)
@@ -65,13 +66,13 @@ class EditIncomePage(ctk.CTkFrame):
         # ── Título ────────────────────────────────────────────────────────────
         ctk.CTkLabel(
             self,
-            text="Editar Renda",
+            text="Editar Perfil",
             font=title_font,
         ).grid(row=0, column=0, padx=40, pady=(48, 4))
 
         ctk.CTkLabel(
             self,
-            text="Atualize sua renda e gastos mensais",
+            text="Atualize seu nome, renda e gastos mensais",
             font=ctk.CTkFont(size=13),
             text_color="gray",
         ).grid(row=1, column=0, padx=40, pady=(0, 28))
@@ -81,20 +82,36 @@ class EditIncomePage(ctk.CTkFrame):
         form_frame.grid(row=2, column=0, padx=60, pady=0, sticky="ew")
         form_frame.grid_columnconfigure(1, weight=1)
 
+        # Nome
+        ctk.CTkLabel(
+            form_frame,
+            text="Nome",
+            font=label_font,
+            anchor="w",
+        ).grid(row=0, column=0, padx=(0, 16), pady=(0, 6), sticky="w")
+
+        self._name_entry = ctk.CTkEntry(
+            form_frame,
+            placeholder_text="Ex: João Silva",
+            height=38,
+        )
+        self._name_entry.grid(row=0, column=1, pady=(0, 6), sticky="ew")
+        self._name_entry.insert(0, self._profile.name)
+
         # Renda mensal
         ctk.CTkLabel(
             form_frame,
             text="Renda mensal (R$)",
             font=label_font,
             anchor="w",
-        ).grid(row=0, column=0, padx=(0, 16), pady=(0, 6), sticky="w")
+        ).grid(row=1, column=0, padx=(0, 16), pady=(12, 6), sticky="w")
 
         self._income_entry = ctk.CTkEntry(
             form_frame,
             placeholder_text="Ex: 5000.00",
             height=38,
         )
-        self._income_entry.grid(row=0, column=1, pady=(0, 6), sticky="ew")
+        self._income_entry.grid(row=1, column=1, pady=(12, 6), sticky="ew")
         self._income_entry.insert(0, f"{self._profile.monthly_income:.2f}")
         self._income_entry.bind("<KeyRelease>", lambda e: self._update_surplus_preview())
 
@@ -104,18 +121,19 @@ class EditIncomePage(ctk.CTkFrame):
             text="Gastos mensais (R$)",
             font=label_font,
             anchor="w",
-        ).grid(row=1, column=0, padx=(0, 16), pady=(12, 6), sticky="w")
+        ).grid(row=2, column=0, padx=(0, 16), pady=(12, 6), sticky="w")
 
         self._expenses_entry = ctk.CTkEntry(
             form_frame,
             placeholder_text="Ex: 3000.00",
             height=38,
         )
-        self._expenses_entry.grid(row=1, column=1, pady=(12, 6), sticky="ew")
+        self._expenses_entry.grid(row=2, column=1, pady=(12, 6), sticky="ew")
         self._expenses_entry.insert(0, f"{self._profile.monthly_expenses:.2f}")
         self._expenses_entry.bind("<KeyRelease>", lambda e: self._update_surplus_preview())
 
         # Guarda os valores originais para o botão de reset
+        self._original_name     = self._profile.name
         self._original_income   = self._profile.monthly_income
         self._original_expenses = self._profile.monthly_expenses
 
@@ -206,6 +224,8 @@ class EditIncomePage(ctk.CTkFrame):
 
     def _on_reset(self):
         """Restaura os campos para os valores originais ao entrar na tela."""
+        self._name_entry.delete(0, "end")
+        self._name_entry.insert(0, self._original_name)
         self._income_entry.delete(0, "end")
         self._income_entry.insert(0, f"{self._original_income:.2f}")
         self._expenses_entry.delete(0, "end")
@@ -218,8 +238,13 @@ class EditIncomePage(ctk.CTkFrame):
     # -------------------------------------------------------------------------
 
     def _on_confirm(self):
+        name         = self._name_entry.get().strip()
         income_raw   = self._income_entry.get().strip().replace(",", ".")
         expenses_raw = self._expenses_entry.get().strip().replace(",", ".")
+
+        if not name:
+            self._error_text.set("⚠  Por favor, informe seu nome.")
+            return
 
         try:
             income = float(income_raw)
@@ -238,7 +263,7 @@ class EditIncomePage(ctk.CTkFrame):
             return
 
         self._error_text.set("")
-        self._on_save(income, expenses)
+        self._on_save(name, income, expenses)
 
 
 # -----------------------------------------------------------------------------
@@ -262,7 +287,7 @@ if __name__ == "__main__":
     ctk.set_default_color_theme("blue")
 
     root = ctk.CTk()
-    root.title("Editar Renda")
+    root.title("Editar Perfil")
     root.geometry("560x480")
     root.resizable(False, False)
 
@@ -281,7 +306,7 @@ if __name__ == "__main__":
     EditIncomePage(
         master=root,
         profile=_profile,
-        on_save=lambda inc, exp: print(f"Salvo — Renda: R$ {inc:.2f}  Gastos: R$ {exp:.2f}"),
+        on_save=lambda name, inc, exp: print(f"Salvo — Nome: {name}  Renda: R$ {inc:.2f}  Gastos: R$ {exp:.2f}"),
         on_cancel=lambda: print("Cancelado"),
         fg_color="transparent",
     ).pack(fill="both", expand=True)

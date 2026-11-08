@@ -7,7 +7,7 @@ logo após a criação de perfil e no retorno de cada ciclo.
 Opções disponíveis:
   1. Realizar Missões   → entra no simulador (quest + mainPage)
   2. Material de Estudo → área de conteúdo educativo
-  3. Reconfigurar Perfil → volta para CreateProfile
+  3. Editar Perfil → abre EditIncomePage com nome + renda + gastos
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ class HubPage(ctk.CTkFrame):
             net_worth:       Patrimônio atual (R$), exibido como resumo.
             on_missions:     Callback ao escolher "Realizar Missões".
             on_study:        Callback ao escolher "Material de Estudo".
-            on_reconfigure:  Callback ao escolher "Reconfigurar Perfil".
+            on_reconfigure:  Callback ao escolher "Editar Perfil".
         """
         super().__init__(master, **kwargs)
         self._player_name = player_name
@@ -129,8 +129,8 @@ class HubPage(ctk.CTkFrame):
             parent=btn_frame,
             row=2,
             icon="⚙️",
-            title="Reconfigurar Perfil",
-            subtitle="Atualize sua renda, gastos ou objetivo financeiro",
+            title="Editar Perfil",
+            subtitle="Atualize seu nome, renda ou gastos mensais",
             command=self._on_reconfigure,
             accent=False,
         )
