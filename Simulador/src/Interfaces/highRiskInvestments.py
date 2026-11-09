@@ -136,14 +136,12 @@ class HighRiskInvestmentsPage(ctk.CTkFrame):
             for i, stock in enumerate(self._stocks):
                 chg = stock.get("change_pct", 0.0)
                 chg_sign = "+" if chg >= 0 else ""
-                trend_val = stock.get("trend", "➡️  Estável")
                 btn = ctk.CTkButton(
                     scroll_mkt,
                     text=(
                         f"{stock['ticker']:<7}  {stock.get('name', ''):<24}"
                         f"  R$ {stock['price']:>8.2f}"
                         f"  {chg_sign}{chg:.1f}%"
-                        f"   {trend_val}"
                     ),
                     font=ctk.CTkFont(size=12, family="Courier"),
                     height=40,
@@ -349,11 +347,11 @@ if __name__ == "__main__":
 
     _demo_stocks = [
         {"ticker": "BRCO3", "name": "Banco do Reinos S.A.", "sector": "Financeiro",
-         "price": 28.50, "change_pct": +1.2, "trend": "📈 Alta", "cycles_in_trend": 2},
-        {"ticker": "PTRX4", "name": "PetroReinos S.A.", "sector": "Energia",
-         "price": 35.00, "change_pct": -2.5, "trend": "📉 Baixa", "cycles_in_trend": 1},
+         "price": 28.50, "change_pct": +1.2},
+        {"ticker": "PTRX4", "name": "PetroReinos S.A.",     "sector": "Energia",
+         "price": 35.00, "change_pct": -2.5},
         {"ticker": "GLDX3", "name": "Guildas de Ouro S.A.", "sector": "Mineração",
-         "price": 55.00, "change_pct": 0.1, "trend": "➡️  Estável", "cycles_in_trend": 5},
+         "price": 55.00, "change_pct": 0.1},
     ]
     _demo_portfolio = [
         {"ticker": "BRCO3", "shares": 35.0877, "avg_purchase_price": 27.10,

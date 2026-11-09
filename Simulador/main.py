@@ -561,13 +561,13 @@ class App(ctk.CTk):
             portfolio = self._current_portfolio()
             snap = self._engine.snapshot(portfolio) if self._engine and portfolio else {}
 
-            # Build stock list from real engine market data
+            # Build stock list from real engine market data.
+            # Strip internal-only fields (trend, cycles_in_trend) before
+            # passing to the UI — players should not see the engine's hidden state.
+            _HIDDEN = {"trend", "cycles_in_trend"}
             stocks = [
-                s_snap
-                for s_snap in (
-                    self._engine.stocks[t].snapshot()
-                    for t in self._engine.stocks
-                )
+                {k: v for k, v in self._engine.stocks[t].snapshot().items() if k not in _HIDDEN}
+                for t in self._engine.stocks
             ] if self._engine else []
 
             portfolio_positions = snap.get("stock_positions", [])

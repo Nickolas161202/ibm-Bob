@@ -975,6 +975,38 @@ Retorne SOMENTE o JSON abaixo, sem texto adicional:
 REGRAS DO TIPO:
 {quest_type_rules}
 
+AÇÕES DISPONÍVEIS — RESTRIÇÃO ABSOLUTA:
+O simulador permite APENAS as seguintes ações. A quest DEVE ser totalmente resolvível
+usando somente estas ações. É PROIBIDO criar condições que dependam de qualquer outra ação.
+
+  RENDA FIXA (comprar e resgatar posições):
+    • Tesouro Selic        — pós-fixado, 100% SELIC, liquidez diária, sem carência
+    • Tesouro Prefixado    — taxa fixa 11,5% a.a., carência 24 meses (pode resgatar antes)
+    • Tesouro IPCA+        — IPCA + 5,5% a.a., carência 36 meses (pode resgatar antes)
+    • CDB Liquidez Diária  — 100% CDI, liquidez diária, sem carência
+    • CDB 90 dias          — 105% CDI, carência 3 meses (NÃO pode resgatar antes)
+    • CDB 1 ano            — 110% CDI, carência 12 meses (NÃO pode resgatar antes)
+    • LCI 6 meses          — 93% CDI, isento de IR, carência 6 meses (NÃO pode resgatar antes)
+    • LCA 1 ano            — 95% CDI, isento de IR, carência 12 meses (NÃO pode resgatar antes)
+
+  RENDA VARIÁVEL (comprar e vender cotas):
+    • BRCO3 — Banco do Reinos S.A.   (setor: Financeiro, sensível à SELIC)
+    • PTRX4 — PetroReinos S.A.       (setor: Energia, influenciada por commodities)
+    • MGCO3 — MagiaComércio S.A.     (setor: Consumo, alta volatilidade)
+    • GLDX3 — Guildas de Ouro S.A.   (setor: Mineração, hedge em crises)
+    • TCNV5 — TecnoVentos S.A.       (setor: Tecnologia, muito volátil)
+
+  CAIXA:
+    • O depósito da sobra mensal (R$ {monthly_surplus:,.2f}) é automático — não é uma ação do usuário.
+    • Saques NÃO são possíveis.
+
+EXEMPLOS DO QUE É PROIBIDO GERAR:
+  ✗ "Contrate um seguro", "Abra uma poupança", "Invista em FIIs", "Diversifique em 5 ativos"
+    (FIIs não existem no simulador)
+  ✗ Qualquer produto financeiro não listado acima
+  ✗ Condições que dependam de eventos externos ao controle do usuário (ex: "espere a SELIC cair")
+  ✗ Condições que exijam VENDER renda fixa em carência (ex: CDB 90 dias só pode ser resgatado após 3 meses)
+
 PERFIL DO USUÁRIO:
   Nome                   : {name}
   Perfil de risco inferido (pelo agente, use este): {inferred_risk}
@@ -1025,6 +1057,7 @@ INSTRUÇÕES:
 - NÃO repita como tema principal nenhum dos tópicos já dominados.
 - Use o CONTEXTO DE META para calibrar o valor objetivo da quest: se o usuário está atrasado (fora da trilha), aumente a urgência e o valor-alvo; se está adiantado, introduza mais complexidade.
 - Use o COMPORTAMENTO RECENTE para criar uma narrativa personalizada com base em padrões históricos (ex: entesouramento, concentração, frequência de trades). IMPORTANTE: esses dados refletem comportamentos passados — não ações realizadas agora. Gere uma quest que incentive melhorias em relação a esses padrões.
+- ANTES de gerar o JSON, verifique mentalmente: cada condição de vitória e derrota é realizável usando APENAS as ações listadas em "AÇÕES DISPONÍVEIS"? Se não for, reescreva até que seja.
 Retorne SOMENTE o JSON abaixo, sem texto adicional, sem markdown, sem comentários:
 
 {{
