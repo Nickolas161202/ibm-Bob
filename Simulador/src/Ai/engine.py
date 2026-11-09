@@ -829,15 +829,17 @@ Considere:
 Retorne SOMENTE o JSON abaixo, sem texto adicional:
 
 {{
-  "score": <0-100>,
-  "objective_score": <1-100, sua avaliação de 1 a 100 de quanto o usuário cumpriu o OBJETIVO específico desta quest. Considere: 1-24 = não cumprido, 25-75 = quase lá, 76-100 = cumprido>,
+  "score": <0-100, pontuação geral ponderando os três critérios abaixo>,
+  "objective_score": <0-100, grau de cumprimento do OBJETIVO específico desta quest. 0-24 = não cumprido, 25-75 = parcial, 76-100 = cumprido>,
+  "allocation_score": <0-100, qualidade da alocação do portfólio: diversificação, proporção renda fixa/variável, uso adequado do caixa>,
+  "risk_score": <0-100, qualidade da gestão de risco: reserva de emergência, exposição adequada ao risco declarado, proteção do capital>,
   "main_weakness": "<fraqueza principal em 1-3 palavras, ex: diversificacao, gestao_de_risco, liquidez>",
   "inferred_risk": "<conservador|moderado|arrojado>",
   "inferred_level": "<iniciante|intermediario|avancado>",
   "reasoning": "<2-3 frases justificando a inferência com base no comportamento observado>",
   "summary": "<2-3 frases de feedback direto ao usuário sobre o que fez bem e o que pode melhorar>",
   "quest_tip": "<1 dica educativa curta e acionável para a próxima quest>",
-  "narrative": "<debriefing completo em 5 seções: 1. RESUMO DO DESEMPENHO — o que o usuário fez bem e mal considerando o tipo de quest; 2. ESTIMATIVA ÓTIMA — a estratégia que teria maximizado o resultado, com ativos e % específicos; 3. QUANTO FICOU NA MESA — diferença estimada em R$ entre resultado obtido e resultado ótimo; 4. PONTUAÇÃO: XX/100 — pontuação com os três critérios (objetivo, alocação, gestão de risco); 5. ORIENTAÇÃO PARA O PRÓXIMO CICLO — instrução educativa de 2-3 frases baseada no principal erro>"
+  "narrative": "<debriefing completo em 5 seções: 1. RESUMO DO DESEMPENHO — o que o usuário fez bem e mal considerando o tipo de quest; 2. ESTIMATIVA ÓTIMA — a estratégia que teria maximizado o resultado, com ativos e % específicos; 3. QUANTO FICOU NA MESA — diferença estimada em R$ entre resultado obtido e resultado ótimo; 4. PONTUAÇÃO: XX/100 — pontuação exibindo objective_score, allocation_score e risk_score que você gerou neste JSON; 5. ORIENTAÇÃO PARA O PRÓXIMO CICLO — instrução educativa de 2-3 frases baseada no principal erro>"
 }}"""
 
         return self._bob.send_prompt(prompt)

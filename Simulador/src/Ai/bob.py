@@ -56,40 +56,40 @@ class Bob:
         neutral_dir = os.path.join(tempfile.gettempdir(), "bob_neutral")
         os.makedirs(neutral_dir, exist_ok=True)
 
-        # Write prompt to a temp file to avoid shell arg-length / encoding limits.
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".txt", encoding="utf-8", delete=False
-        ) as f:
-            f.write(prompt)
-            prompt_file = f.name
-
-        try:
-            with open(prompt_file, "r", encoding="utf-8") as stdin_f:
-                result = subprocess.run(
-                    [
-                        bob_exe, "run",
-                        "-f", "json",
-                        "--disable-mcp",
-                        "--workspace", neutral_dir,
-                        "-",          # read prompt from stdin
-                    ],
-                    stdin=stdin_f,
-                    capture_output=True,
-                    text=True,
-                    cwd=neutral_dir,
-                )
-        finally:
-            os.unlink(prompt_file)
+        # Encode prompt to UTF-8 bytes and pass via stdin pipe.
+        # Capturing raw bytes (no text= / encoding= on subprocess) and then
+        # decoding explicitly with UTF-8 is the only reliable way to avoid
+        # Windows cp1252 locale corrupting accented characters in both the
+        # prompt sent and the response received.
+        result = subprocess.run(
+            [
+                bob_exe, "run",
+                "-f", "json",
+                "--disable-mcp",
+                "--workspace", neutral_dir,
+            ],
+            input=prompt.encode("utf-8"),
+            capture_output=True,
+            cwd=neutral_dir,
+        )
 
         if result.returncode != 0:
-            raise RuntimeError(f"Bob CLI error: {result.stderr.strip()}")
+            stderr_text = result.stderr.decode("utf-8", errors="replace").strip()
+            raise RuntimeError(f"Bob CLI error: {stderr_text}")
 
         try:
-            data = json.loads(result.stdout.strip())
-            return self._strip_markdown_fence(data["last_message"])
+            stdout_text = result.stdout.decode("utf-8")
+            data = json.loads(stdout_text.strip())
+            last_message = data.get("last_message")
+            if last_message is None:
+                raise RuntimeError(
+                    f"Bob returned null last_message. Full output: {stdout_text[:300]}"
+                )
+            return self._strip_markdown_fence(last_message)
         except (json.JSONDecodeError, KeyError) as exc:
+            stdout_preview = result.stdout.decode("utf-8", errors="replace")[:200]
             raise RuntimeError(
-                f"Unexpected Bob CLI output: {result.stdout[:200]}"
+                f"Unexpected Bob CLI output: {stdout_preview}"
             ) from exc
 
     @staticmethod

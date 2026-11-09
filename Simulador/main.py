@@ -617,25 +617,16 @@ class App(ctk.CTk):
                     "Continue investindo com disciplina! "
                     "Mantenha sua reserva de emergência antes de buscar maior retorno.",
                 )
-                # objective_score (1-100) is determined by the AI in analyze_quest_performance
-                quest_completed = min(max(int(ai_result.get("objective_score", 0)), 1), 100)
 
-                # ── Sub-Task 4: extract new fields for DebriefingPage ─────────
-                quest_tip = ai_result.get("quest_tip", "")
-                objective_score = ai_result.get("objective_score")
-                if objective_score is not None:
-                    objective_score = min(max(int(objective_score), 0), 100)
-
-                # Allocation score: good if cash < 40% and portfolio is diversified
-                cash_pct_val = alloc.get("cash_pct", 100.0)
-                fixed_pct_val = alloc.get("fixed_pct", 0.0)
-                stocks_pct_val = alloc.get("stocks_pct", 0.0)
-                alloc_ok = cash_pct_val < 40.0 and (fixed_pct_val + stocks_pct_val) > 30.0
-                allocation_score = 80 if alloc_ok else (50 if cash_pct_val < 60.0 else 25)
-
-                # Risk score: good if emergency fund ≥ 100%
-                ef_pct = snap.get("emergency_fund", {}).get("completion_pct", 0.0)
-                risk_score = 80 if ef_pct >= 100.0 else (50 if ef_pct >= 50.0 else 25)
+                # ── All scores come exclusively from the AI result ─────────────
+                # score       → overall badge (🏆 / ⚡ / 💀)
+                # objective_score, allocation_score, risk_score → sub-score pills
+                # Using a single source of truth avoids contradictory values.
+                quest_completed  = ai_result.get("score", 50)
+                quest_tip        = ai_result.get("quest_tip", "")
+                objective_score  = ai_result.get("objective_score")
+                allocation_score = ai_result.get("allocation_score")
+                risk_score       = ai_result.get("risk_score")
 
                 # Goal progress fields
                 goal_p_snap = snap.get("goal_progress", {})
@@ -1245,11 +1236,15 @@ class App(ctk.CTk):
             )
             data = json.loads(raw)
 
-            # Normalise numeric scores to int 0–100
-            score = min(max(int(data.get("score", 50)), 0), 100)
-            obj_score = min(max(int(data.get("objective_score", 50)), 0), 100)
-            data["score"] = score
-            data["objective_score"] = obj_score
+            # Normalise all numeric scores to int 0–100 (single source of truth)
+            score      = min(max(int(data.get("score",            50)), 0), 100)
+            obj_score  = min(max(int(data.get("objective_score",  50)), 0), 100)
+            alloc_score = min(max(int(data.get("allocation_score", 50)), 0), 100)
+            risk_score_ = min(max(int(data.get("risk_score",       50)), 0), 100)
+            data["score"]            = score
+            data["objective_score"]  = obj_score
+            data["allocation_score"] = alloc_score
+            data["risk_score"]       = risk_score_
 
             # Validate enum fields; fall back to current profile on invalid values
             _valid_risk  = {"conservador", "moderado", "arrojado"}
@@ -1285,21 +1280,23 @@ class App(ctk.CTk):
         except Exception as e:
             print(f"[QUEST] Falha ao avaliar quest via IA: {e}")
 
-        # Static stub fallback
+        # Static stub fallback — keep all score fields consistent
         score = 50
         self._quest_scores.append(score)
         return {
-            "score": score,
-            "objective_score": 50,
+            "score":            score,
+            "objective_score":  50,
+            "allocation_score": 50,
+            "risk_score":       50,
             "summary": (
                 "Continue investindo com disciplina! "
                 "Mantenha sua reserva de emergência antes de buscar maior retorno."
             ),
-            "main_weakness": "diversificação",
-            "inferred_risk": self._profile.risk_profile,
-            "inferred_level": self._profile.knowledge_level,
-            "reasoning": "Avaliação automática (modo de teste — IA desativada).",
-            "quest_tip": "Experimente diversificar entre renda fixa e variável.",
+            "main_weakness":   "diversificação",
+            "inferred_risk":   self._profile.risk_profile,
+            "inferred_level":  self._profile.knowledge_level,
+            "reasoning":       "Avaliação automática (modo de teste — IA desativada).",
+            "quest_tip":       "Experimente diversificar entre renda fixa e variável.",
         }
 
     def _maybe_confirm_profile_update(self, ai_result: dict, on_done: Callable):
