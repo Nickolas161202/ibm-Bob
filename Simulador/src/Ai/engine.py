@@ -1,12 +1,14 @@
 from __future__ import annotations
 import json
 from .bob import Bob
+from .prompt_loader import PromptLoader
 
 
 class Engine:
 
     def __init__(self, bob: Bob):
         self._bob = bob
+        self._prompts = PromptLoader()
 
     def initialize_session(
         self,
@@ -31,42 +33,33 @@ class Engine:
         income_lines = "\n".join(
             f"  - {item.get('source', 'Unknown')}: R$ {item.get('amount', 0):.2f}"
             for item in incomes
-        )
+        ) or "  (nenhuma informada)"
         outcome_lines = "\n".join(
             f"  - {item.get('category', 'Unknown')}: R$ {item.get('amount', 0):.2f}"
             for item in outcomes
-        )
+        ) or "  (nenhuma informada)"
         debt_lines = "\n".join(
             f"  - {item.get('creditor', 'Unknown')}: total R$ {item.get('amount', 0):.2f}"
             f", parcela R$ {item.get('monthly_payment', 0):.2f}/mês"
             for item in debts
-        )
+        ) or "  (nenhuma informada)"
 
         total_income = sum(item.get("amount", 0) for item in incomes)
         total_outcome = sum(item.get("amount", 0) for item in outcomes)
         total_debt_payment = sum(item.get("monthly_payment", 0) for item in debts)
         net = total_income - total_outcome - total_debt_payment
 
-        prompt = f"""Você é um assistente educacional de finanças pessoais dentro de um simulador gamificado. Neste ambiente,
-cada quest simula a passagem de tempo correspondente a um mês, leve isso em consideração ao gerar a quest.
-O usuário a seguir está iniciando uma sessão. Memorize este perfil — ele será a base para todas as suas avaliações, briefings e debriefings desta sessão.
-
-=== PERFIL DO USUÁRIO ===
-Nome: {name}
-
-Entradas mensais (total: R$ {total_income:.2f}):
-{income_lines or "  (nenhuma informada)"}
-
-Saídas mensais fixas (total: R$ {total_outcome:.2f}):
-{outcome_lines or "  (nenhuma informada)"}
-
-Dívidas (parcela total: R$ {total_debt_payment:.2f}/mês):
-{debt_lines or "  (nenhuma informada)"}
-
-Saldo livre estimado: R$ {net:.2f}/mês
-
-Com base neste perfil, calibre sua linguagem, nível de risco sugerido e expectativas de desempenho para este usuário.
-Aguarde as instruções da próxima etapa (briefing da quest). APENAS ARMAZENE OS DADOS RECEBIDOS, NÃO GERE NENHUMA RESPOSTA SEM SER SOLICITADO."""
+        prompt = self._prompts.format(
+            "session", "initialize_session",
+            name=name,
+            total_income=total_income,
+            income_lines=income_lines,
+            total_outcome=total_outcome,
+            outcome_lines=outcome_lines,
+            total_debt_payment=total_debt_payment,
+            debt_lines=debt_lines,
+            net=net,
+        )
         return self._bob.send_prompt(prompt)
 
     def send_simulator_context(self, context: dict) -> str:
@@ -191,27 +184,15 @@ Aguarde as instruções da próxima etapa (briefing da quest). APENAS ARMAZENE O
             )
         products_block = "\n".join(products_lines) or "  (nenhum produto disponível)"
 
-        prompt = f"""=== ESTADO DO SIMULADOR — CICLO {cycle} ===
-
-INDICADORES DE MERCADO:
-{market_block}
-
-PORTFÓLIO DO USUÁRIO:
-{portfolio_block}
-
-INDICADORES FINANCEIROS:
-{indicators_block}
-
-MERCADO DE AÇÕES (preços atuais):
-{stocks_block}
-
-PRODUTOS DE RENDA FIXA DISPONÍVEIS:
-{products_block}
-
----
-Com base neste estado, você pode ser consultado como conselheiro enquanto o usuário toma suas decisões de investimento para este ciclo.
-Não tome decisões pelo usuário — apenas oriente quando solicitado."""
-
+        prompt = self._prompts.format(
+            "session", "send_simulator_context",
+            cycle=cycle,
+            market_block=market_block,
+            portfolio_block=portfolio_block,
+            indicators_block=indicators_block,
+            stocks_block=stocks_block,
+            products_block=products_block,
+        )
         return self._bob.send_prompt(prompt)
 
     def send_player_actions(self, actions: list[dict], cycle: int | None = None) -> str:
@@ -241,13 +222,10 @@ Não tome decisões pelo usuário — apenas oriente quando solicitado."""
         Returns the raw text response from Bob.
         """
         if not actions:
-            prompt = (
-                "O usuário não realizou nenhuma operação neste ciclo. "
-                "Considere isso na sua avaliação de desempenho."
+            return self._bob.send_prompt(
+                self._prompts.get_template("session", "send_player_actions_empty")
             )
-            return self._bob.send_prompt(prompt)
 
-        # Infer cycle from first entry if not given explicitly
         display_cycle = cycle if cycle is not None else actions[0].get("cycle", "?")
 
         _action_labels = {
@@ -287,16 +265,12 @@ Não tome decisões pelo usuário — apenas oriente quando solicitado."""
 
         actions_block = "\n".join(lines)
 
-        prompt = f"""=== AÇÕES DO USUÁRIO — CICLO {display_cycle} ===
-
-O usuário realizou {len(actions)} operação(ões) neste ciclo:
-
-{actions_block}
-
----
-Estas são todas as decisões tomadas pelo usuário neste ciclo.
-Guarde-as para o debriefing — avalie a qualidade das escolhas em relação ao contexto de mercado e ao perfil do usuário."""
-
+        prompt = self._prompts.format(
+            "session", "send_player_actions",
+            display_cycle=display_cycle,
+            action_count=len(actions),
+            actions_block=actions_block,
+        )
         return self._bob.send_prompt(prompt)
 
     def send_debriefing_request(
@@ -346,7 +320,6 @@ Guarde-as para o debriefing — avalie a qualidade das escolhas em relação ao 
         else:
             objective_status = f"❌ OBJETIVO NÃO CUMPRIDO  ({pct}%)"
 
-        # --- Cycle events ------------------------------------------------
         market_events = cycle_result.get("market_events", [])
         stock_events  = cycle_result.get("stock_events", [])
         cycle_num     = cycle_result.get("cycle", "?")
@@ -360,7 +333,6 @@ Guarde-as para o debriefing — avalie a qualidade das escolhas em relação ao 
             events_lines.extend(f"    • {e}" for e in stock_events)
         events_block = "\n".join(events_lines) or "  (sem eventos registrados)"
 
-        # --- Portfolio cycle earnings ------------------------------------
         summaries = cycle_result.get("portfolio_summaries", {})
         earnings_lines = []
         for summary in summaries.values():
@@ -370,42 +342,16 @@ Guarde-as para o debriefing — avalie a qualidade das escolhas em relação ao 
             )
         earnings_block = "\n".join(earnings_lines) or "  (sem rendimentos registrados)"
 
-        prompt = f"""=== SOLICITAÇÃO DE DEBRIEFING — CICLO {cycle_num} ===
-
-TIPO DE QUEST: {quest_type_label}
-OBJETIVO DA QUEST: {quest_objective}
-RESULTADO: {objective_status}
-
-EVENTOS DO CICLO:
-{events_block}
-
-RENDIMENTOS DO CICLO:
-{earnings_block}
-
----
-Com base em tudo que foi compartilhado nesta sessão — perfil do usuário, estado do simulador, ações realizadas e resultado do ciclo acima — realize o debriefing completo.
-
-Seu debriefing deve obrigatoriamente conter:
-
-1. RESUMO DO DESEMPENHO
-   Explique o que o usuário fez bem e o que fez mal, considerando o tipo de quest ({quest_type}).
-
-2. ESTIMATIVA ÓTIMA
-   Descreva a estratégia que teria maximizado o resultado neste ciclo dado o contexto de mercado. Seja específico (quais ativos, quanto alocar).
-
-3. QUANTO FICOU NA MESA
-   Calcule ou estime a diferença entre o resultado obtido e o resultado ótimo em R$.
-
-4. PONTUAÇÃO  (formato obrigatório)
-   Atribua uma pontuação de 0 a 100 considerando:
-   - Cumprimento do objetivo da quest (peso maior)
-   - Qualidade das decisões de alocação para o perfil do usuário
-   - Gestão de risco e reserva de emergência
-   Apresente como: PONTUAÇÃO: XX/100
-
-5. ORIENTAÇÃO PARA O PRÓXIMO CICLO
-   Uma instrução educativa curta (2–3 frases) baseada no principal erro ou oportunidade perdida."""
-
+        prompt = self._prompts.format(
+            "session", "send_debriefing_request",
+            cycle_num=cycle_num,
+            quest_type_label=quest_type_label,
+            quest_objective=quest_objective,
+            objective_status=objective_status,
+            events_block=events_block,
+            earnings_block=earnings_block,
+            quest_type=quest_type,
+        )
         return self._bob.send_prompt(prompt)
 
     def generate_study_content(
@@ -486,58 +432,22 @@ Seu debriefing deve obrigatoriamente conter:
             "score de quiz baixo (abaixo de 70)."
         )
 
-        prompt = f"""Gere conteúdo educativo de finanças seguindo as instruções abaixo e retorne SOMENTE o JSON solicitado.
-
-=== GERAÇÃO DE CONTEÚDO EDUCATIVO ===
-
-CONTEXTO DO USUÁRIO:
-  Nome            : {name}
-  Nível           : {knowledge_level}
-  Perfil de risco : {risk_profile}
-  Objetivo        : {goal}
-
-DESEMPENHO NO SIMULADOR:
-  Pontuação média : {avg_score:.1f}/100
-  Quests concluídas: {completed_quests}
-  Principal fraqueza: {main_weakness}
-  Temas das últimas quests: {', '.join(last_topics) if last_topics else '(nenhuma)'}
-
-BIBLIOTECA DE ESTUDO ATUAL:
-  Conteúdos dominados : {mastered_count}
-  Conteúdos pendentes : {unmastered}
-  Temas já cobertos:
-{topics_covered_block}
-  Melhores scores de quiz por tema:
-{best_scores_block}
-
-INSTRUÇÃO DE SELEÇÃO DE TEMA:
-{topic_instruction}
-
----
-Você é um especialista em educação financeira. Sua tarefa é:
-
-1. PESQUISAR o tema escolhido com profundidade técnica — inclua conceitos, mecanismos, fórmulas relevantes e exemplos reais do mercado brasileiro.
-
-2. ADAPTAR esse conteúdo para o nível "{knowledge_level}" do usuário — use linguagem acessível, analogias práticas e exemplos conectados ao objetivo "{goal}" do usuário. NÃO omita a substância, apenas torne-a mais digestível.
-
-3. CRIAR um quiz de 4 perguntas de múltipla escolha (4 opções cada) que teste a compreensão real do tema — não apenas memorização.
-
-Retorne SOMENTE o JSON abaixo, sem texto adicional antes ou depois, sem markdown, sem blocos de código:
-
-{{
-  "topic": "<nome do tema escolhido>",
-  "source_text": "<conteúdo técnico completo, em português, com ao menos 3 parágrafos>",
-  "adapted_text": "<versão adaptada e simplificada, em português, com ao menos 3 parágrafos e exemplos práticos>",
-  "quiz": [
-    {{
-      "question": "<pergunta>",
-      "options": ["<A>", "<B>", "<C>", "<D>"],
-      "correct_index": <0-3>,
-      "explanation": "<explicação da resposta correta>"
-    }}
-  ]
-}}"""
-
+        prompt = self._prompts.format(
+            "study", "generate_study_content",
+            name=name,
+            knowledge_level=knowledge_level,
+            risk_profile=risk_profile,
+            goal=goal,
+            avg_score=avg_score,
+            completed_quests=completed_quests,
+            main_weakness=main_weakness,
+            last_topics_line=", ".join(last_topics) if last_topics else "(nenhuma)",
+            mastered_count=mastered_count,
+            unmastered=unmastered,
+            topics_covered_block=topics_covered_block,
+            best_scores_block=best_scores_block,
+            topic_instruction=topic_instruction,
+        )
         return self._bob.send_prompt(prompt)
 
     def evaluate_study_mastery(
@@ -574,8 +484,8 @@ Retorne SOMENTE o JSON abaixo, sem texto adicional antes ou depois, sem markdown
 
         Returns the raw text response from Bob (expected to be valid JSON).
         """
-        avg_score     = simulator_performance.get("avg_score", 0.0)
-        main_weakness = simulator_performance.get("main_weakness", "não identificada")
+        avg_score      = simulator_performance.get("avg_score", 0.0)
+        main_weakness  = simulator_performance.get("main_weakness", "não identificada")
         related_quests = simulator_performance.get("topic_related_quests", 0)
 
         if quiz_results:
@@ -591,40 +501,18 @@ Retorne SOMENTE o JSON abaixo, sem texto adicional antes ou depois, sem markdown
             best_score = last_score = attempts = 0
             quiz_block = "  (nenhum quiz realizado ainda)"
 
-        prompt = f"""Avalie o domínio do conteúdo seguindo as instruções abaixo e retorne SOMENTE o JSON solicitado.
-
-=== AVALIAÇÃO DE DOMÍNIO DO CONTEÚDO ===
-
-TEMA AVALIADO: {topic}
-NÍVEL DO USUÁRIO: {knowledge_level}
-
-RESULTADOS DE QUIZ SOBRE ESTE TEMA:
-{quiz_block}
-  Melhor score: {best_score}/100
-  Último score: {last_score}/100
-  Total de tentativas: {attempts}
-
-DESEMPENHO NO SIMULADOR (contexto geral):
-  Pontuação média : {avg_score:.1f}/100
-  Principal fraqueza identificada: {main_weakness}
-  Quests relacionadas a este tema concluídas: {related_quests}
-
-CRITÉRIOS DE DOMÍNIO SUGERIDOS (use como referência, não como regra rígida):
-  - Quiz: score >= 75 em ao menos uma tentativa
-  - Simulador: pontuação média >= 60 após quests relacionadas ao tema
-  - Consistência: melhora progressiva nos scores de quiz
-
----
-Com base nos dados acima, avalie se o usuário demonstrou domínio suficiente do tema "{topic}" para avançar para conteúdo mais complexo.
-
-Retorne SOMENTE o JSON abaixo, sem texto adicional:
-
-{{
-  "mastered": <true ou false>,
-  "reason": "<explicação em 1-2 frases do porquê dominado ou não>",
-  "recommendation": "<o que o usuário deve estudar ou praticar a seguir>"
-}}"""
-
+        prompt = self._prompts.format(
+            "study", "evaluate_study_mastery",
+            topic=topic,
+            knowledge_level=knowledge_level,
+            quiz_block=quiz_block,
+            best_score=best_score,
+            last_score=last_score,
+            attempts=attempts,
+            avg_score=avg_score,
+            main_weakness=main_weakness,
+            related_quests=related_quests,
+        )
         return self._bob.send_prompt(prompt)
 
     def analyze_quest_performance(
@@ -695,19 +583,16 @@ Retorne SOMENTE o JSON abaixo, sem texto adicional:
             "sell_stock":   "Venda de Ação",
         }
 
-        # Group actions by cycle value
         from collections import defaultdict
         actions_by_cycle: dict = defaultdict(list)
         for a in actions:
             actions_by_cycle[a.get("cycle", 0)].append(a)
 
-        # Build the block with temporal labels per cycle group
         current_cycle = portfolio_snapshot.get("cycle", max(actions_by_cycle.keys(), default=0))
         sorted_cycles = sorted(actions_by_cycle.keys())
 
         cycle_blocks = []
         for cyc in sorted_cycles:
-            # Label the cycle relative to the current one
             delta = current_cycle - cyc
             if delta == 0:
                 temporal_label = f"★ MÊS ATUAL (ciclo {cyc}) — DECISÕES NOVAS DO USUÁRIO"
@@ -772,7 +657,7 @@ Retorne SOMENTE o JSON abaixo, sem texto adicional:
         # ── Inference history ────────────────────────────────────────────────
         if inference_history:
             history_lines = []
-            for h in inference_history[-5:]:   # últimas 5 inferências
+            for h in inference_history[-5:]:
                 applied = "aplicada" if h.get("applied") else "não aplicada"
                 history_lines.append(
                     f"  [ciclo {h.get('cycle', '?')}] score {h.get('score', '?')}/100  "
@@ -784,64 +669,22 @@ Retorne SOMENTE o JSON abaixo, sem texto adicional:
         else:
             history_block = "  (primeira quest — sem histórico anterior)"
 
-        prompt = f"""Analise o desempenho da quest seguindo as instruções abaixo e retorne SOMENTE o JSON solicitado.
-
-=== ANÁLISE DE DESEMPENHO DA QUEST ===
-
-QUEST: {q_title}
-TIPO: {q_type}
-OBJETIVO: {q_objective}
-CONDIÇÃO DE VITÓRIA: {q_victory}
-CONDIÇÃO DE DERROTA: {q_defeat}
-DURAÇÃO: {q_cycles} ciclo(s)
-
-AÇÕES DO USUÁRIO (organizadas por mês):
-ATENÇÃO — LEITURA OBRIGATÓRIA ANTES DE AVALIAR:
-  • As ações estão agrupadas por mês (ciclo).
-  • O grupo marcado com ★ MÊS ATUAL contém as NOVAS DECISÕES do usuário — são estas que devem ser avaliadas.
-  • Os grupos "MÊS ANTERIOR" e "MÊS Nº (há X meses)" são HISTÓRICO para contexto comparativo.
-    NÃO interprete ações históricas como se tivessem sido realizadas novamente agora.
-    Use o histórico apenas para identificar padrões e evolução do comportamento ao longo do tempo.
-
-{actions_block}
-
-ESTADO FINAL DO PORTFÓLIO:
-{portfolio_block}
-
-PERFIL DECLARADO ATUAL:
-  Perfil de risco     : {c_risk}
-  Nível de conhecimento: {c_level}
-  Objetivo            : {c_goal}
-  Sobra mensal        : R$ {c_surplus:.2f}
-
-HISTÓRICO DE INFERÊNCIAS ANTERIORES:
-{history_block}
-
----
-Avalie com base nas NOVAS DECISÕES do mês atual (★). Use o histórico para entender tendências.
-Considere:
-  - Como o usuário alocou os recursos no mês atual (diversificação, proporção renda fixa/variável)
-  - Se respeitou a reserva de emergência
-  - Se agiu de forma coerente com o perfil declarado ou demonstrou comportamento diferente
-  - Evolução em relação às inferências anteriores e ao histórico de ações (se houver)
-  - Em que grau o usuário cumpriu o objetivo da quest (condição de vitória vs derrota) com as ações DO MÊS ATUAL.
-    Caso o usuário não cumpra o solicitado, a nota deve ser afetada drasticamente.
-Retorne SOMENTE o JSON abaixo, sem texto adicional:
-
-{{
-  "score": <0-100, pontuação geral ponderando os três critérios abaixo>,
-  "objective_score": <0-100, grau de cumprimento do OBJETIVO específico desta quest. 0-24 = não cumprido, 25-75 = parcial, 76-100 = cumprido>,
-  "allocation_score": <0-100, qualidade da alocação do portfólio: diversificação, proporção renda fixa/variável, uso adequado do caixa>,
-  "risk_score": <0-100, qualidade da gestão de risco: reserva de emergência, exposição adequada ao risco declarado, proteção do capital>,
-  "main_weakness": "<fraqueza principal em 1-3 palavras, ex: diversificacao, gestao_de_risco, liquidez>",
-  "inferred_risk": "<conservador|moderado|arrojado>",
-  "inferred_level": "<iniciante|intermediario|avancado>",
-  "reasoning": "<2-3 frases justificando a inferência com base no comportamento observado>",
-  "summary": "<2-3 frases de feedback direto ao usuário sobre o que fez bem e o que pode melhorar>",
-  "quest_tip": "<1 dica educativa curta e acionável para a próxima quest>",
-  "narrative": "<debriefing completo em 5 seções: 1. RESUMO DO DESEMPENHO — o que o usuário fez bem e mal considerando o tipo de quest; 2. ESTIMATIVA ÓTIMA — a estratégia que teria maximizado o resultado, com ativos e % específicos; 3. QUANTO FICOU NA MESA — diferença estimada em R$ entre resultado obtido e resultado ótimo; 4. PONTUAÇÃO: XX/100 — pontuação exibindo objective_score, allocation_score e risk_score que você gerou neste JSON; 5. ORIENTAÇÃO PARA O PRÓXIMO CICLO — instrução educativa de 2-3 frases baseada no principal erro>"
-}}"""
-
+        prompt = self._prompts.format(
+            "quest", "analyze_quest_performance",
+            q_title=q_title,
+            q_type=q_type,
+            q_objective=q_objective,
+            q_victory=q_victory,
+            q_defeat=q_defeat,
+            q_cycles=q_cycles,
+            actions_block=actions_block,
+            portfolio_block=portfolio_block,
+            c_risk=c_risk,
+            c_level=c_level,
+            c_goal=c_goal,
+            c_surplus=c_surplus,
+            history_block=history_block,
+        )
         return self._bob.send_prompt(prompt)
 
     def generate_quest(
@@ -968,105 +811,39 @@ Retorne SOMENTE o JSON abaixo, sem texto adicional:
         else:
             portfolio_line = "Portfólio ainda não iniciado."
 
-        prompt = f"""Gere uma quest de investimentos seguindo as instruções abaixo e retorne SOMENTE o JSON solicitado.
-
-=== GERAÇÃO DE QUEST — TIPO: {quest_type.upper()} ===
-
-REGRAS DO TIPO:
-{quest_type_rules}
-
-AÇÕES DISPONÍVEIS — RESTRIÇÃO ABSOLUTA:
-O simulador permite APENAS as seguintes ações. A quest DEVE ser totalmente resolvível
-usando somente estas ações. É PROIBIDO criar condições que dependam de qualquer outra ação.
-
-  RENDA FIXA (comprar e resgatar posições):
-    • Tesouro Selic        — pós-fixado, 100% SELIC, liquidez diária, sem carência
-    • Tesouro Prefixado    — taxa fixa 11,5% a.a., carência 24 meses (pode resgatar antes)
-    • Tesouro IPCA+        — IPCA + 5,5% a.a., carência 36 meses (pode resgatar antes)
-    • CDB Liquidez Diária  — 100% CDI, liquidez diária, sem carência
-    • CDB 90 dias          — 105% CDI, carência 3 meses (NÃO pode resgatar antes)
-    • CDB 1 ano            — 110% CDI, carência 12 meses (NÃO pode resgatar antes)
-    • LCI 6 meses          — 93% CDI, isento de IR, carência 6 meses (NÃO pode resgatar antes)
-    • LCA 1 ano            — 95% CDI, isento de IR, carência 12 meses (NÃO pode resgatar antes)
-
-  RENDA VARIÁVEL (comprar e vender cotas):
-    • BRCO3 — Banco do Reinos S.A.   (setor: Financeiro, sensível à SELIC)
-    • PTRX4 — PetroReinos S.A.       (setor: Energia, influenciada por commodities)
-    • MGCO3 — MagiaComércio S.A.     (setor: Consumo, alta volatilidade)
-    • GLDX3 — Guildas de Ouro S.A.   (setor: Mineração, hedge em crises)
-    • TCNV5 — TecnoVentos S.A.       (setor: Tecnologia, muito volátil)
-
-  CAIXA:
-    • O depósito da sobra mensal (R$ {monthly_surplus:,.2f}) é automático — não é uma ação do usuário.
-    • Saques NÃO são possíveis.
-
-EXEMPLOS DO QUE É PROIBIDO GERAR:
-  ✗ "Contrate um seguro", "Abra uma poupança", "Invista em FIIs", "Diversifique em 5 ativos"
-    (FIIs não existem no simulador)
-  ✗ Qualquer produto financeiro não listado acima
-  ✗ Condições que dependam de eventos externos ao controle do usuário (ex: "espere a SELIC cair")
-  ✗ Condições que exijam VENDER renda fixa em carência (ex: CDB 90 dias só pode ser resgatado após 3 meses)
-
-PERFIL DO USUÁRIO:
-  Nome                   : {name}
-  Perfil de risco inferido (pelo agente, use este): {inferred_risk}
-  Nível de conhecimento inferido (pelo agente, use este): {inferred_level}
-  (Perfil declarado no onboarding — apenas referência: risco={user_profile.get("risk_profile")}, nível={user_profile.get("knowledge_level")})
-  Renda mensal           : R$ {monthly_income:,.2f}
-  Gastos fixos mensais   : R$ {monthly_expenses:,.2f}
-  Sobra mensal para investir: R$ {monthly_surplus:,.2f}
-  Objetivo financeiro    : {goal}
-  Meta                   : R$ {goal_amount:,.2f} em {goal_deadline} meses
-
-ESTADO DO PORTFÓLIO:
-  {portfolio_line}
-
-CONTEXTO DE META:
-  Meta financeira      : {goal_urgency.get("goal_amount", goal_amount):,.2f} R$
-  Progresso atual      : {goal_urgency.get("completion_pct", 0.0):.1f}%  (R$ {goal_urgency.get("current_net_worth", current_nw):,.2f} acumulados)
-  Meses restantes      : {goal_urgency.get("months_remaining", goal_deadline)}
-  Poupança necessária/mês: R$ {goal_urgency.get("required_monthly_saving", 0.0):,.2f}
-  Na trilha            : {"Sim — ritmo de poupança é suficiente" if goal_urgency.get("on_track") else "Não — usuário precisa poupar mais para atingir a meta no prazo"}
-
-COMPORTAMENTO RECENTE (últimos {recent_behavior.get("cycles_analyzed", 0)} meses — HISTÓRICO TEMPORAL):
-ATENÇÃO: estes dados são um resumo do histórico de comportamento do usuário ao longo dos meses.
-  NÃO interprete estes dados como se o usuário tivesse realizado essas ações agora — são padrões acumulados.
-  Use o histórico apenas para personalizar o tema e a dificuldade da próxima quest.
-  Operações totais no período : {recent_behavior.get("trade_count", 0)}
-  Meses com entesouramento    : {recent_behavior.get("cash_hoard_cycles", 0)} (meses em que caixa > 50% do patrimônio)
-  % média em caixa no período : {recent_behavior.get("avg_cash_pct", 0.0):.1f}%
-  Classe de ativo dominante   : {recent_behavior.get("dominant_asset_class", "caixa")}
-
-HISTÓRICO DE APRENDIZADO:
-  {score_line}
-  {trend_line}
-  Quests concluídas      : {completed_quests}
-  Última quest (tipo)    : {last_quest_type}
-  Principal fraqueza identificada: {main_weakness}
-  {mastered_line}
-
-CALIBRAÇÃO DE DIFICULDADE:
-  {difficulty_hint}
-
----
-INSTRUÇÕES:
-- Calibre a dificuldade e o foco educativo usando o perfil INFERIDO (não o declarado).
-- Direcione o tema educativo da quest à fraqueza principal ({main_weakness}), a menos que ela já esteja nos tópicos dominados.
-- Reflita o estado real do portfólio: se o usuário está muito em caixa, incentive aplicação; se está muito concentrado em um ativo, incentive diversificação.
-- Defina metas numéricas realistas com base na sobra mensal de R$ {monthly_surplus:,.2f}.
-- NÃO repita como tema principal nenhum dos tópicos já dominados.
-- Use o CONTEXTO DE META para calibrar o valor objetivo da quest: se o usuário está atrasado (fora da trilha), aumente a urgência e o valor-alvo; se está adiantado, introduza mais complexidade.
-- Use o COMPORTAMENTO RECENTE para criar uma narrativa personalizada com base em padrões históricos (ex: entesouramento, concentração, frequência de trades). IMPORTANTE: esses dados refletem comportamentos passados — não ações realizadas agora. Gere uma quest que incentive melhorias em relação a esses padrões.
-- ANTES de gerar o JSON, verifique mentalmente: cada condição de vitória e derrota é realizável usando APENAS as ações listadas em "AÇÕES DISPONÍVEIS"? Se não for, reescreva até que seja.
-Retorne SOMENTE o JSON abaixo, sem texto adicional, sem markdown, sem comentários:
-
-{{
-  "title": "<título narrativo curto e imersivo>",
-  "context": "<2-3 frases de cenário com tom narrativo e referência à situação real do usuário>",
-  "objective": "<uma frase clara e mensurável com valor em R$ ou % baseado no perfil>",
-  "victory_condition": "<critério objetivo em R$ ou % — use a sobra mensal como referência>",
-  "defeat_condition": "<o que configura falha — seja explícito e realista>",
-  "initial_tip": "<1 dica educativa curta focada na fraqueza '{main_weakness}' do usuário>"
-}}"""
-
+        prompt = self._prompts.format(
+            "quest", "generate_quest",
+            quest_type_upper=quest_type.upper(),
+            quest_type_rules=quest_type_rules,
+            monthly_surplus=monthly_surplus,
+            name=name,
+            inferred_risk=inferred_risk,
+            inferred_level=inferred_level,
+            declared_risk=user_profile.get("risk_profile"),
+            declared_level=user_profile.get("knowledge_level"),
+            monthly_income=monthly_income,
+            monthly_expenses=monthly_expenses,
+            goal=goal,
+            goal_amount=goal_amount,
+            goal_deadline=goal_deadline,
+            portfolio_line=portfolio_line,
+            urgency_goal_amount=goal_urgency.get("goal_amount", goal_amount),
+            urgency_completion_pct=goal_urgency.get("completion_pct", 0.0),
+            urgency_current_nw=goal_urgency.get("current_net_worth", current_nw),
+            urgency_months_remaining=goal_urgency.get("months_remaining", goal_deadline),
+            urgency_required_saving=goal_urgency.get("required_monthly_saving", 0.0),
+            urgency_on_track_label="Sim — ritmo de poupança é suficiente" if goal_urgency.get("on_track") else "Não — usuário precisa poupar mais para atingir a meta no prazo",
+            behavior_cycles_analyzed=recent_behavior.get("cycles_analyzed", 0),
+            behavior_trade_count=recent_behavior.get("trade_count", 0),
+            behavior_cash_hoard_cycles=recent_behavior.get("cash_hoard_cycles", 0),
+            behavior_avg_cash_pct=recent_behavior.get("avg_cash_pct", 0.0),
+            behavior_dominant_class=recent_behavior.get("dominant_asset_class", "caixa"),
+            score_line=score_line,
+            trend_line=trend_line,
+            completed_quests=completed_quests,
+            last_quest_type=last_quest_type,
+            main_weakness=main_weakness,
+            mastered_line=mastered_line,
+            difficulty_hint=difficulty_hint,
+        )
         return self._bob.send_prompt(prompt)
