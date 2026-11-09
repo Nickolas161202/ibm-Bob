@@ -52,23 +52,30 @@ class EndOfMonthPage(ctk.CTkFrame):
 
     def _build(self):
         self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+
+        # ── Scrollable container ─────────────────────────────────────────────
+        scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
+        scroll.grid(row=0, column=0, sticky="nsew")
+        scroll.grid_columnconfigure(0, weight=1)
+        _s = scroll
 
         # ── Título ────────────────────────────────────────────────────────────
         ctk.CTkLabel(
-            self,
+            _s,
             text=f"📅  Fim do Mês {self._cycle}",
             font=ctk.CTkFont(size=24, weight="bold"),
         ).grid(row=0, column=0, padx=40, pady=(44, 4))
 
         ctk.CTkLabel(
-            self,
+            _s,
             text="Confira o que aconteceu no Reino das Finanças",
             font=ctk.CTkFont(size=13),
             text_color="gray",
         ).grid(row=1, column=0, padx=40, pady=(0, 20))
 
         # ── Indicadores macro ─────────────────────────────────────────────────
-        macro = ctk.CTkFrame(self, fg_color="transparent")
+        macro = ctk.CTkFrame(_s, fg_color="transparent")
         macro.grid(row=2, column=0, padx=40, pady=0, sticky="ew")
         macro.grid_columnconfigure((0, 1, 2), weight=1)
 
@@ -89,14 +96,14 @@ class EndOfMonthPage(ctk.CTkFrame):
             ).grid(row=1, column=0, pady=(0, 12))
 
         # ── Eventos de mercado ────────────────────────────────────────────────
-        self._section(row=3, icon="🏛️", title="Eventos do Mercado", items=self._market_events)
+        self._section(parent=_s, row=3, icon="🏛️", title="Eventos do Mercado", items=self._market_events)
 
         # ── Variação das ações ────────────────────────────────────────────────
-        self._section(row=4, icon="📉", title="Mercado de Ações", items=self._stock_events)
+        self._section(parent=_s, row=4, icon="📉", title="Mercado de Ações", items=self._stock_events)
 
         # ── Botão avançar ─────────────────────────────────────────────────────
         ctk.CTkButton(
-            self,
+            _s,
             text="Próximo Mês  →",
             font=ctk.CTkFont(size=15, weight="bold"),
             width=220,
@@ -105,9 +112,9 @@ class EndOfMonthPage(ctk.CTkFrame):
             command=self._on_next,
         ).grid(row=5, column=0, padx=40, pady=(20, 44))
 
-    def _section(self, row: int, icon: str, title: str, items: list[str]):
+    def _section(self, parent: ctk.CTkFrame, row: int, icon: str, title: str, items: list[str]):
         """Renderiza um card de lista com título e itens."""
-        card = ctk.CTkFrame(self, corner_radius=10)
+        card = ctk.CTkFrame(parent, corner_radius=10)
         card.grid(row=row, column=0, padx=40, pady=(14, 0), sticky="ew")
         card.grid_columnconfigure(0, weight=1)
 
@@ -144,7 +151,8 @@ if __name__ == "__main__":
     root = ctk.CTk()
     root.title("Fim do Mês")
     root.geometry("620x620")
-    root.resizable(False, False)
+    root.minsize(480, 400)
+    root.resizable(True, True)
 
     EndOfMonthPage(
         master=root,

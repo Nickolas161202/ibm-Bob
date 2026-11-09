@@ -72,23 +72,30 @@ class CreateProfilePage(ctk.CTkFrame):
         button_font = ctk.CTkFont(size=15, weight="bold")
 
         self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+
+        # ── Scrollable container ─────────────────────────────────────────────
+        scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
+        scroll.grid(row=0, column=0, sticky="nsew")
+        scroll.grid_columnconfigure(0, weight=1)
+        _s = scroll
 
         # ── Título ───────────────────────────────────────────────────────────
         ctk.CTkLabel(
-            self,
+            _s,
             text="Criar Perfil",
             font=title_font,
         ).grid(row=0, column=0, padx=40, pady=(48, 4))
 
         ctk.CTkLabel(
-            self,
+            _s,
             text="Preencha suas informações financeiras básicas",
             font=ctk.CTkFont(size=13),
             text_color="gray",
         ).grid(row=1, column=0, padx=40, pady=(0, 28))
 
         # ── Campos ───────────────────────────────────────────────────────────
-        form_frame = ctk.CTkFrame(self, fg_color="transparent")
+        form_frame = ctk.CTkFrame(_s, fg_color="transparent")
         form_frame.grid(row=2, column=0, padx=60, pady=0, sticky="ew")
         form_frame.grid_columnconfigure(1, weight=1)
 
@@ -101,7 +108,7 @@ class CreateProfilePage(ctk.CTkFrame):
 
         # ── Mensagem de erro ─────────────────────────────────────────────────
         self.error_label = ctk.CTkLabel(
-            self,
+            _s,
             textvariable=self._error_text,
             text_color="#e05c5c",
             font=ctk.CTkFont(size=12),
@@ -110,7 +117,7 @@ class CreateProfilePage(ctk.CTkFrame):
 
         # ── Botão confirmar ──────────────────────────────────────────────────
         ctk.CTkButton(
-            self,
+            _s,
             text="Confirmar  →",
             font=button_font,
             width=200,
@@ -232,7 +239,8 @@ if __name__ == "__main__":
     root = ctk.CTk()
     root.title("Criar Perfil")
     root.geometry("560x680")
-    root.resizable(False, False)
+    root.minsize(440, 400)
+    root.resizable(True, True)
 
     def on_submit(profile: InvestorProfile):
         print(f"Perfil criado: {profile}")

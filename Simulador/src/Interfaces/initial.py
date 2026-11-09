@@ -28,8 +28,10 @@ class InitialPage(ctk.CTkFrame):
         self._build()
 
     def _build(self):
-        # Permite que a coluna central se expanda
+        # Linhas elásticas acima e abaixo centralizam o conteúdo verticalmente
         self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)   # espaço elástico superior
+        self.grid_rowconfigure(5, weight=1)   # espaço elástico inferior
 
         # ── Título / Nome do aplicativo ──────────────────────────────────────
         self.title_label = ctk.CTkLabel(
@@ -37,7 +39,7 @@ class InitialPage(ctk.CTkFrame):
             text="💰 Simulador de Investimentos",
             font=ctk.CTkFont(size=28, weight="bold"),
         )
-        self.title_label.grid(row=0, column=0, padx=40, pady=(60, 8))
+        self.title_label.grid(row=1, column=0, padx=40, pady=(0, 8))
 
         # ── Subtítulo temático ───────────────────────────────────────────────
         self.subtitle_label = ctk.CTkLabel(
@@ -46,7 +48,7 @@ class InitialPage(ctk.CTkFrame):
             font=ctk.CTkFont(size=16, slant="italic"),
             text_color="gray",
         )
-        self.subtitle_label.grid(row=1, column=0, padx=40, pady=(0, 32))
+        self.subtitle_label.grid(row=2, column=0, padx=40, pady=(0, 32))
 
         # ── Mensagem de boas-vindas ──────────────────────────────────────────
         self.welcome_label = ctk.CTkLabel(
@@ -61,7 +63,7 @@ class InitialPage(ctk.CTkFrame):
             justify="center",
             wraplength=440,
         )
-        self.welcome_label.grid(row=2, column=0, padx=40, pady=(0, 48))
+        self.welcome_label.grid(row=3, column=0, padx=40, pady=(0, 48))
 
         # ── Botão próxima página ─────────────────────────────────────────────
         self.next_button = ctk.CTkButton(
@@ -73,7 +75,7 @@ class InitialPage(ctk.CTkFrame):
             corner_radius=10,
             command=self._on_next,
         )
-        self.next_button.grid(row=3, column=0, padx=40, pady=(0, 60))
+        self.next_button.grid(row=4, column=0, padx=40, pady=0)
 
 
 # ---------------------------------------------------------------------------
@@ -87,7 +89,8 @@ if __name__ == "__main__":
     root = ctk.CTk()
     root.title("Simulador de Investimentos")
     root.geometry("560x420")
-    root.resizable(False, False)
+    root.minsize(400, 340)
+    root.resizable(True, True)
 
     def on_next():
         print("Navegar para a próxima página...")

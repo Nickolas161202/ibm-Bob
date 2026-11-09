@@ -56,13 +56,15 @@ class HubPage(ctk.CTkFrame):
 
     def _build(self):
         self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)   # espaço elástico superior
+        self.grid_rowconfigure(6, weight=1)   # espaço elástico inferior
 
         # ── Saudação ──────────────────────────────────────────────────────────
         ctk.CTkLabel(
             self,
             text=f"Olá, {self._player_name}!",
             font=ctk.CTkFont(size=26, weight="bold"),
-        ).grid(row=0, column=0, padx=40, pady=(52, 4))
+        ).grid(row=1, column=0, padx=40, pady=(0, 4))
 
         cycle_text = "Início da Jornada" if self._cycle == 0 else f"Mês {self._cycle}"
         ctk.CTkLabel(
@@ -70,12 +72,12 @@ class HubPage(ctk.CTkFrame):
             text=f"📅  {cycle_text}  —  Reino das Finanças",
             font=ctk.CTkFont(size=13),
             text_color="gray",
-        ).grid(row=1, column=0, padx=40, pady=(0, 8))
+        ).grid(row=2, column=0, padx=40, pady=(0, 8))
 
         # ── Card de patrimônio (só exibe a partir do ciclo 1) ─────────────────
         if self._cycle > 0:
             worth_card = ctk.CTkFrame(self, corner_radius=10)
-            worth_card.grid(row=2, column=0, padx=80, pady=(0, 24), sticky="ew")
+            worth_card.grid(row=3, column=0, padx=80, pady=(0, 24), sticky="ew")
             worth_card.grid_columnconfigure(0, weight=1)
             ctk.CTkLabel(
                 worth_card,
@@ -90,7 +92,7 @@ class HubPage(ctk.CTkFrame):
             ).grid(row=1, column=0, pady=(0, 12))
         else:
             # Espaço reservado para alinhar com o layout do ciclo > 0
-            ctk.CTkLabel(self, text="").grid(row=2, column=0, pady=12)
+            ctk.CTkLabel(self, text="").grid(row=3, column=0, pady=12)
 
         # ── Separador ─────────────────────────────────────────────────────────
         ctk.CTkLabel(
@@ -98,11 +100,11 @@ class HubPage(ctk.CTkFrame):
             text="O que você deseja fazer?",
             font=ctk.CTkFont(size=14),
             text_color="gray",
-        ).grid(row=3, column=0, padx=40, pady=(0, 16))
+        ).grid(row=4, column=0, padx=40, pady=(0, 16))
 
         # ── Botões de navegação ───────────────────────────────────────────────
         btn_frame = ctk.CTkFrame(self, fg_color="transparent")
-        btn_frame.grid(row=4, column=0, padx=48, pady=0, sticky="ew")
+        btn_frame.grid(row=5, column=0, padx=48, pady=0, sticky="ew")
         btn_frame.grid_columnconfigure(0, weight=1)
 
         self._menu_button(
@@ -226,7 +228,8 @@ if __name__ == "__main__":
     root = ctk.CTk()
     root.title("Hub — Menu Principal")
     root.geometry("620x480")
-    root.resizable(False, False)
+    root.minsize(480, 380)
+    root.resizable(True, True)
 
     HubPage(
         master=root,

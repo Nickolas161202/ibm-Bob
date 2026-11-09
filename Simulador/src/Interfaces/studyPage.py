@@ -71,9 +71,16 @@ class StudyPage(ctk.CTkFrame):
     def _build_list_view(self):
         self._clear()
         self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+
+        # ── Scrollable container ──────────────────────────────────────────────
+        scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
+        scroll.grid(row=0, column=0, sticky="nsew")
+        scroll.grid_columnconfigure(0, weight=1)
+        _s = scroll
 
         # ── Cabeçalho ─────────────────────────────────────────────────────────
-        header = ctk.CTkFrame(self, fg_color="transparent")
+        header = ctk.CTkFrame(_s, fg_color="transparent")
         header.grid(row=0, column=0, padx=40, pady=(36, 0), sticky="ew")
         header.grid_columnconfigure(1, weight=1)
 
@@ -91,14 +98,14 @@ class StudyPage(ctk.CTkFrame):
         ).grid(row=0, column=1, sticky="w")
 
         ctk.CTkLabel(
-            self,
+            _s,
             text="Selecione um conteúdo para estudar ou peça um tema novo",
             font=ctk.CTkFont(size=13),
             text_color="gray",
         ).grid(row=1, column=0, padx=40, pady=(4, 16))
 
         # ── Campo de pedido de tema ────────────────────────────────────────────
-        request_frame = ctk.CTkFrame(self, corner_radius=10)
+        request_frame = ctk.CTkFrame(_s, corner_radius=10)
         request_frame.grid(row=2, column=0, padx=40, pady=(0, 16), sticky="ew")
         request_frame.grid_columnconfigure(0, weight=1)
 
@@ -126,7 +133,7 @@ class StudyPage(ctk.CTkFrame):
         # ── Lista de conteúdos ────────────────────────────────────────────────
         if not self._contents:
             ctk.CTkLabel(
-                self,
+                _s,
                 text=(
                     "Ainda não há conteúdos gerados para você.\n"
                     "Complete quests no simulador ou peça um tema acima."
@@ -137,12 +144,12 @@ class StudyPage(ctk.CTkFrame):
             ).grid(row=3, column=0, padx=40, pady=40)
             return
 
-        scroll = ctk.CTkScrollableFrame(self, corner_radius=10)
-        scroll.grid(row=3, column=0, padx=40, pady=0, sticky="ew")
-        scroll.grid_columnconfigure(0, weight=1)
+        content_list = ctk.CTkFrame(_s, fg_color="transparent")
+        content_list.grid(row=3, column=0, padx=40, pady=(0, 24), sticky="ew")
+        content_list.grid_columnconfigure(0, weight=1)
 
         for i, content in enumerate(self._contents):
-            self._content_card(scroll, content, row=i)
+            self._content_card(content_list, content, row=i)
 
     def _content_card(self, parent, content: StudyContent, row: int):
         """Card clicável para um conteúdo na lista."""
@@ -226,9 +233,16 @@ class StudyPage(ctk.CTkFrame):
         self._clear()
         content = self._active_content
         self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+
+        # ── Scrollable container ──────────────────────────────────────────────
+        scroll_outer = ctk.CTkScrollableFrame(self, fg_color="transparent")
+        scroll_outer.grid(row=0, column=0, sticky="nsew")
+        scroll_outer.grid_columnconfigure(0, weight=1)
+        _s = scroll_outer
 
         # ── Cabeçalho ─────────────────────────────────────────────────────────
-        header = ctk.CTkFrame(self, fg_color="transparent")
+        header = ctk.CTkFrame(_s, fg_color="transparent")
         header.grid(row=0, column=0, padx=40, pady=(36, 0), sticky="ew")
         header.grid_columnconfigure(1, weight=1)
 
@@ -247,7 +261,7 @@ class StudyPage(ctk.CTkFrame):
         ).grid(row=0, column=1, sticky="w")
 
         # ── Toggle adaptado / original ─────────────────────────────────────────
-        toggle_frame = ctk.CTkFrame(self, fg_color="transparent")
+        toggle_frame = ctk.CTkFrame(_s, fg_color="transparent")
         toggle_frame.grid(row=1, column=0, padx=40, pady=(12, 0), sticky="w")
 
         adapted_color  = "#3b82d4" if not self._show_source else "gray25"
@@ -271,33 +285,29 @@ class StudyPage(ctk.CTkFrame):
             command=self._show_original,
         ).grid(row=0, column=1)
 
-        # ── Área de texto rolável ──────────────────────────────────────────────
+        # ── Área de texto ─────────────────────────────────────────────────────
         text_body = content.source_text if self._show_source else content.adapted_text
         label_mode = "Conteúdo Original (técnico)" if self._show_source else "Versão Simplificada"
 
         ctk.CTkLabel(
-            self,
+            _s,
             text=label_mode,
             font=ctk.CTkFont(size=12, weight="bold"),
             text_color="gray",
             anchor="w",
         ).grid(row=2, column=0, padx=40, pady=(16, 4), sticky="w")
 
-        text_scroll = ctk.CTkScrollableFrame(self, height=260, corner_radius=10)
-        text_scroll.grid(row=3, column=0, padx=40, pady=0, sticky="ew")
-        text_scroll.grid_columnconfigure(0, weight=1)
-
         ctk.CTkLabel(
-            text_scroll,
+            _s,
             text=text_body,
             font=ctk.CTkFont(size=13),
             wraplength=520,
             justify="left",
             anchor="nw",
-        ).grid(row=0, column=0, padx=12, pady=12, sticky="nw")
+        ).grid(row=3, column=0, padx=52, pady=(0, 8), sticky="w")
 
         # ── Botão do quiz ──────────────────────────────────────────────────────
-        quiz_frame = ctk.CTkFrame(self, fg_color="transparent")
+        quiz_frame = ctk.CTkFrame(_s, fg_color="transparent")
         quiz_frame.grid(row=4, column=0, padx=40, pady=(20, 40))
 
         if content.quiz:
@@ -348,9 +358,15 @@ class StudyPage(ctk.CTkFrame):
         total   = len(content.quiz)
 
         self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+
+        scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
+        scroll.grid(row=0, column=0, sticky="nsew")
+        scroll.grid_columnconfigure(0, weight=1)
+        _s = scroll
 
         # ── Cabeçalho ─────────────────────────────────────────────────────────
-        header = ctk.CTkFrame(self, fg_color="transparent")
+        header = ctk.CTkFrame(_s, fg_color="transparent")
         header.grid(row=0, column=0, padx=40, pady=(36, 0), sticky="ew")
         header.grid_columnconfigure(1, weight=1)
 
@@ -369,18 +385,18 @@ class StudyPage(ctk.CTkFrame):
 
         # progresso
         ctk.CTkLabel(
-            self,
+            _s,
             text=f"Pergunta {q_idx + 1} de {total}",
             font=ctk.CTkFont(size=13),
             text_color="gray",
         ).grid(row=1, column=0, padx=40, pady=(8, 0))
 
-        progress = ctk.CTkProgressBar(self, width=400)
+        progress = ctk.CTkProgressBar(_s, width=400)
         progress.set((q_idx) / total)
         progress.grid(row=2, column=0, padx=40, pady=(4, 20))
 
         # ── Pergunta ──────────────────────────────────────────────────────────
-        q_card = ctk.CTkFrame(self, corner_radius=12)
+        q_card = ctk.CTkFrame(_s, corner_radius=12)
         q_card.grid(row=3, column=0, padx=40, pady=0, sticky="ew")
         q_card.grid_columnconfigure(0, weight=1)
 
@@ -393,8 +409,8 @@ class StudyPage(ctk.CTkFrame):
         ).grid(row=0, column=0, padx=20, pady=(16, 16), sticky="w")
 
         # ── Opções ────────────────────────────────────────────────────────────
-        opts_frame = ctk.CTkFrame(self, fg_color="transparent")
-        opts_frame.grid(row=4, column=0, padx=40, pady=(12, 0), sticky="ew")
+        opts_frame = ctk.CTkFrame(_s, fg_color="transparent")
+        opts_frame.grid(row=4, column=0, padx=40, pady=(12, 24), sticky="ew")
         opts_frame.grid_columnconfigure(0, weight=1)
 
         option_labels = ["A", "B", "C", "D"]
@@ -428,13 +444,19 @@ class StudyPage(ctk.CTkFrame):
         total = len(self._active_content.quiz)
         q_idx = self._quiz_index
         self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+
+        scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
+        scroll.grid(row=0, column=0, sticky="nsew")
+        scroll.grid_columnconfigure(0, weight=1)
+        _s = scroll
 
         # ── Resultado da resposta ─────────────────────────────────────────────
         result_text = "✅  Correto!" if correct else "❌  Incorreto"
         result_color = "#4caf50" if correct else "#e05c5c"
 
         ctk.CTkLabel(
-            self,
+            _s,
             text=result_text,
             font=ctk.CTkFont(size=24, weight="bold"),
             text_color=result_color,
@@ -444,7 +466,7 @@ class StudyPage(ctk.CTkFrame):
         labels = ["A", "B", "C", "D"]
         if not correct:
             ctk.CTkLabel(
-                self,
+                _s,
                 text=(
                     f"Você escolheu: {labels[chosen_idx]}. {q.options[chosen_idx]}\n"
                     f"Resposta correta: {labels[q.correct_index]}. {q.options[q.correct_index]}"
@@ -456,7 +478,7 @@ class StudyPage(ctk.CTkFrame):
             ).grid(row=1, column=0, padx=40, pady=(0, 12))
 
         # explicação
-        exp_card = ctk.CTkFrame(self, corner_radius=12)
+        exp_card = ctk.CTkFrame(_s, corner_radius=12)
         exp_card.grid(row=2, column=0, padx=40, pady=0, sticky="ew")
         exp_card.grid_columnconfigure(0, weight=1)
 
@@ -478,7 +500,7 @@ class StudyPage(ctk.CTkFrame):
 
         # progresso
         ctk.CTkLabel(
-            self,
+            _s,
             text=f"Pergunta {q_idx + 1} de {total}",
             font=ctk.CTkFont(size=13),
             text_color="gray",
@@ -488,7 +510,7 @@ class StudyPage(ctk.CTkFrame):
         is_last = (q_idx + 1 >= total)
         btn_text = "Ver Resultado  →" if is_last else "Próxima  →"
         ctk.CTkButton(
-            self,
+            _s,
             text=btn_text,
             font=ctk.CTkFont(size=14, weight="bold"),
             width=200, height=44, corner_radius=10,
@@ -514,7 +536,13 @@ class StudyPage(ctk.CTkFrame):
         # ── Tela de resultado final ───────────────────────────────────────────
         self._clear()
         self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
         score = round(correct / total * 100) if total > 0 else 0
+
+        scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
+        scroll.grid(row=0, column=0, sticky="nsew")
+        scroll.grid_columnconfigure(0, weight=1)
+        _s = scroll
 
         result_icon = "🏆" if score >= 75 else ("📈" if score >= 50 else "📚")
         result_msg  = (
@@ -526,26 +554,26 @@ class StudyPage(ctk.CTkFrame):
         )
 
         ctk.CTkLabel(
-            self,
+            _s,
             text=f"{result_icon}  Quiz Concluído",
             font=ctk.CTkFont(size=22, weight="bold"),
         ).grid(row=0, column=0, padx=40, pady=(52, 8))
 
         ctk.CTkLabel(
-            self,
+            _s,
             text=f"{correct}/{total} respostas corretas",
             font=ctk.CTkFont(size=32, weight="bold"),
             text_color="#3b82d4",
         ).grid(row=1, column=0, padx=40, pady=(0, 4))
 
         ctk.CTkLabel(
-            self,
+            _s,
             text=f"Score: {score}/100",
             font=ctk.CTkFont(size=16),
             text_color="gray",
         ).grid(row=2, column=0, padx=40, pady=(0, 20))
 
-        msg_card = ctk.CTkFrame(self, corner_radius=12)
+        msg_card = ctk.CTkFrame(_s, corner_radius=12)
         msg_card.grid(row=3, column=0, padx=60, pady=0, sticky="ew")
         msg_card.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(
@@ -556,7 +584,7 @@ class StudyPage(ctk.CTkFrame):
             justify="center",
         ).grid(row=0, column=0, padx=20, pady=16)
 
-        btn_row = ctk.CTkFrame(self, fg_color="transparent")
+        btn_row = ctk.CTkFrame(_s, fg_color="transparent")
         btn_row.grid(row=4, column=0, padx=40, pady=(24, 48))
         btn_row.grid_columnconfigure((0, 1), weight=1)
 

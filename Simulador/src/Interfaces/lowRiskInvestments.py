@@ -72,9 +72,16 @@ class LowRiskInvestmentsPage(ctk.CTkFrame):
 
     def _build(self):
         self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+
+        # ── Scrollable container ─────────────────────────────────────────────
+        scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
+        scroll.grid(row=0, column=0, sticky="nsew")
+        scroll.grid_columnconfigure(0, weight=1)
+        _s = scroll
 
         # ── Cabeçalho ────────────────────────────────────────────────────────
-        header = ctk.CTkFrame(self, fg_color="transparent")
+        header = ctk.CTkFrame(_s, fg_color="transparent")
         header.grid(row=0, column=0, padx=40, pady=(28, 0), sticky="ew")
         header.grid_columnconfigure(1, weight=1)
 
@@ -104,13 +111,13 @@ class LowRiskInvestmentsPage(ctk.CTkFrame):
 
         # ── Produtos disponíveis ──────────────────────────────────────────────
         ctk.CTkLabel(
-            self,
+            _s,
             text="Produtos disponíveis — selecione e informe o valor",
             font=ctk.CTkFont(size=13),
             text_color="gray",
         ).grid(row=1, column=0, padx=40, pady=(14, 6), sticky="w")
 
-        scroll_prod = ctk.CTkScrollableFrame(self, height=160, corner_radius=10)
+        scroll_prod = ctk.CTkScrollableFrame(_s, height=160, corner_radius=10)
         scroll_prod.grid(row=2, column=0, padx=40, pady=0, sticky="ew")
         scroll_prod.grid_columnconfigure(0, weight=1)
 
@@ -145,7 +152,7 @@ class LowRiskInvestmentsPage(ctk.CTkFrame):
             ).grid(row=0, column=0, pady=12)
 
         # ── Input + botão investir ────────────────────────────────────────────
-        input_frame = ctk.CTkFrame(self, fg_color="transparent")
+        input_frame = ctk.CTkFrame(_s, fg_color="transparent")
         input_frame.grid(row=3, column=0, padx=40, pady=(12, 0), sticky="ew")
         input_frame.grid_columnconfigure(1, weight=1)
 
@@ -163,14 +170,14 @@ class LowRiskInvestmentsPage(ctk.CTkFrame):
         self.amount_entry.grid(row=0, column=1, sticky="ew")
 
         ctk.CTkLabel(
-            self,
+            _s,
             textvariable=self._error_text,
             text_color="#e05c5c",
             font=ctk.CTkFont(size=12),
         ).grid(row=4, column=0, padx=40, pady=(6, 0))
 
         ctk.CTkButton(
-            self,
+            _s,
             text="Investir  →",
             font=ctk.CTkFont(size=15, weight="bold"),
             width=200, height=44,
@@ -181,13 +188,13 @@ class LowRiskInvestmentsPage(ctk.CTkFrame):
         # ── Posições abertas ──────────────────────────────────────────────────
         if self._open_positions:
             ctk.CTkLabel(
-                self,
+                _s,
                 text="Posições abertas  (clique para resgatar)",
                 font=ctk.CTkFont(size=13, weight="bold"),
                 anchor="w",
             ).grid(row=6, column=0, padx=40, pady=(18, 4), sticky="w")
 
-            scroll_pos = ctk.CTkScrollableFrame(self, height=110, corner_radius=10)
+            scroll_pos = ctk.CTkScrollableFrame(_s, height=110, corner_radius=10)
             scroll_pos.grid(row=7, column=0, padx=40, pady=(0, 24), sticky="ew")
             scroll_pos.grid_columnconfigure(0, weight=1)
 
@@ -214,7 +221,7 @@ class LowRiskInvestmentsPage(ctk.CTkFrame):
                     command=lambda idx=pos["index"]: self._on_redeem(idx),
                 ).grid(row=pos["index"], column=0, pady=3, sticky="ew")
         else:
-            ctk.CTkFrame(self, height=24, fg_color="transparent").grid(row=6, column=0)
+            ctk.CTkFrame(_s, height=24, fg_color="transparent").grid(row=6, column=0)
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -272,7 +279,8 @@ if __name__ == "__main__":
     root = ctk.CTk()
     root.title("Renda Fixa")
     root.geometry("680x580")
-    root.resizable(False, False)
+    root.minsize(520, 420)
+    root.resizable(True, True)
 
     _demo_products = [
         {"key": "Tesouro Selic", "label": "Tesouro Selic", "rate_display": "100% SELIC",

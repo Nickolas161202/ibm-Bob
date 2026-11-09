@@ -78,7 +78,7 @@ class LoadingPage(ctk.CTkFrame):
             width=320,
             mode="indeterminate",
         )
-        self._progress_bar.grid(row=4, column=0, padx=40, pady=(0, 0))
+        self._progress_bar.grid(row=4, column=0, padx=40, pady=0)
         self._progress_bar.start()
 
     # -------------------------------------------------------------------------

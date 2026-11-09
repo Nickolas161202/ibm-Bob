@@ -266,7 +266,8 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("Simulador de Investimentos — Finvest")
-        self.geometry("680x560")
+        self.geometry("680x620")
+        self.minsize(520, 480)
         self.resizable(True, True)
 
         # ── simulator state ───────────────────────────────────────────────────

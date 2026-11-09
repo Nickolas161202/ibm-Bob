@@ -61,23 +61,30 @@ class MainPage(ctk.CTkFrame):
 
     def _build(self):
         self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+
+        # ── Scrollable container ─────────────────────────────────────────────
+        scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
+        scroll.grid(row=0, column=0, sticky="nsew")
+        scroll.grid_columnconfigure(0, weight=1)
+        _s = scroll
 
         # ── Cabeçalho ────────────────────────────────────────────────────────
         ctk.CTkLabel(
-            self,
+            _s,
             text=f"Bem-vindo, {self._player_name}!",
             font=ctk.CTkFont(size=22, weight="bold"),
         ).grid(row=0, column=0, padx=40, pady=(28, 4))
 
         ctk.CTkLabel(
-            self,
+            _s,
             text=f"📅  Mês {self._cycle}  —  Reino das Finanças",
             font=ctk.CTkFont(size=13),
             text_color="gray",
         ).grid(row=1, column=0, padx=40, pady=(0, 16))
 
         # ── Cards de resumo ──────────────────────────────────────────────────
-        summary_frame = ctk.CTkFrame(self, fg_color="transparent")
+        summary_frame = ctk.CTkFrame(_s, fg_color="transparent")
         summary_frame.grid(row=2, column=0, padx=40, pady=0, sticky="ew")
         summary_frame.grid_columnconfigure((0, 1), weight=1)
 
@@ -85,13 +92,13 @@ class MainPage(ctk.CTkFrame):
         self._stat_card(summary_frame, "📈  Patrimônio Total", f"R$ {self._net_worth:,.2f}", 1)
 
         # ── Missão ativa ─────────────────────────────────────────────────────
-        self._build_quest_card(row=3)
+        self._build_quest_card(parent=_s, row=3)
 
         # ── Holdings (scrollable) ─────────────────────────────────────────────
-        self._build_holdings(row=4)
+        self._build_holdings(parent=_s, row=4)
 
         # ── Botões de ação ───────────────────────────────────────────────────
-        actions_frame = ctk.CTkFrame(self, fg_color="transparent")
+        actions_frame = ctk.CTkFrame(_s, fg_color="transparent")
         actions_frame.grid(row=5, column=0, padx=40, pady=(14, 0), sticky="ew")
         actions_frame.grid_columnconfigure((0, 1), weight=1)
 
@@ -115,7 +122,7 @@ class MainPage(ctk.CTkFrame):
 
         # ── Botão fim do mês ─────────────────────────────────────────────────
         ctk.CTkButton(
-            self,
+            _s,
             text="⏭  Avançar Mês",
             font=ctk.CTkFont(size=15, weight="bold"),
             width=220,
@@ -126,7 +133,7 @@ class MainPage(ctk.CTkFrame):
             command=self._on_end_month,
         ).grid(row=6, column=0, padx=40, pady=(16, 28))
 
-    def _build_quest_card(self, row: int):
+    def _build_quest_card(self, parent: ctk.CTkFrame, row: int):
         """Renders the active quest card, if a quest is set."""
         if not self._active_quest:
             return
@@ -141,7 +148,7 @@ class MainPage(ctk.CTkFrame):
         }
         accent = type_colors.get(q_type, "#3b82d4")
 
-        card = ctk.CTkFrame(self, corner_radius=10)
+        card = ctk.CTkFrame(parent, corner_radius=10)
         card.grid(row=row, column=0, padx=40, pady=(14, 0), sticky="ew")
         card.grid_columnconfigure(0, weight=1)
 
@@ -177,7 +184,7 @@ class MainPage(ctk.CTkFrame):
                 wraplength=460,
             ).grid(row=2, column=1, padx=(6, 16), pady=(4, 12), sticky="w")
 
-    def _build_holdings(self, row: int):
+    def _build_holdings(self, parent: ctk.CTkFrame, row: int):
         """Renders a scrollable holdings card when the user has any open positions."""
         has_fixed  = bool(self._fixed_positions)
         has_stocks = bool(self._stock_positions)
@@ -185,7 +192,7 @@ class MainPage(ctk.CTkFrame):
             return
 
         # outer card for the header label
-        card = ctk.CTkFrame(self, corner_radius=10)
+        card = ctk.CTkFrame(parent, corner_radius=10)
         card.grid(row=row, column=0, padx=40, pady=(14, 0), sticky="ew")
         card.grid_columnconfigure(0, weight=1)
 
@@ -282,7 +289,8 @@ if __name__ == "__main__":
     root = ctk.CTk()
     root.title("Simulador — Página Principal")
     root.geometry("580x400")
-    root.resizable(False, False)
+    root.minsize(460, 340)
+    root.resizable(True, True)
 
     MainPage(
         master=root,

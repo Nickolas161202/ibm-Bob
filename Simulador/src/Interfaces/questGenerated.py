@@ -43,6 +43,8 @@ class QuestGeneratedPage(ctk.CTkFrame):
 
     def _build(self):
         self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)   # espaço elástico superior
+        self.grid_rowconfigure(4, weight=1)   # espaço elástico inferior
 
         # ── Cabeçalho ────────────────────────────────────────────────────────
         ctk.CTkLabel(
@@ -50,7 +52,7 @@ class QuestGeneratedPage(ctk.CTkFrame):
             text="⚔️  Nova Quest",
             font=ctk.CTkFont(size=14),
             text_color="gray",
-        ).grid(row=0, column=0, padx=40, pady=(52, 4))
+        ).grid(row=1, column=0, padx=40, pady=(0, 4))
 
         ctk.CTkLabel(
             self,
@@ -58,11 +60,11 @@ class QuestGeneratedPage(ctk.CTkFrame):
             font=ctk.CTkFont(size=26, weight="bold"),
             wraplength=480,
             justify="center",
-        ).grid(row=1, column=0, padx=40, pady=(0, 24))
+        ).grid(row=2, column=0, padx=40, pady=(0, 24))
 
         # ── Card de descrição ────────────────────────────────────────────────
         card = ctk.CTkFrame(self, corner_radius=12)
-        card.grid(row=2, column=0, padx=48, pady=0, sticky="ew")
+        card.grid(row=3, column=0, padx=48, pady=(0, 16), sticky="ew")
         card.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(
@@ -97,7 +99,7 @@ class QuestGeneratedPage(ctk.CTkFrame):
             height=44,
             corner_radius=10,
             command=self._on_start,
-        ).grid(row=3, column=0, padx=40, pady=(32, 56))
+        ).grid(row=5, column=0, padx=40, pady=0)
 
 
 # ---------------------------------------------------------------------------
@@ -111,7 +113,8 @@ if __name__ == "__main__":
     root = ctk.CTk()
     root.title("Quest Gerada")
     root.geometry("580x480")
-    root.resizable(False, False)
+    root.minsize(440, 360)
+    root.resizable(True, True)
 
     QuestGeneratedPage(
         master=root,
