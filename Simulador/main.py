@@ -140,7 +140,11 @@ def _load_latest_profile() -> Optional[InvestorProfile]:
 # Portfolio persistence
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _save_portfolio(engine: "SimulatorEngine", profile: InvestorProfile) -> None:
+def _save_portfolio(
+    engine: "SimulatorEngine",
+    profile: InvestorProfile,
+    deposit_done_cycle: int = -1,
+) -> None:
     """
     Serialise the portfolio's mutable state to ``data/profiles/portfolio.json``.
 
@@ -151,6 +155,8 @@ def _save_portfolio(engine: "SimulatorEngine", profile: InvestorProfile) -> None
       - net_worth_history, cash_history
       - transaction_log
       - market cycle + SELIC (so earnings stay consistent on reload)
+      - deposit_done_cycle: the cycle for which the monthly deposit was already
+        made, so a reload mid-cycle does not trigger a second deposit.
     """
     from src.Simulator.fixed_income import FixedIncomeType
     portfolio = engine.portfolios.get(profile.user_id)
@@ -185,7 +191,7 @@ def _save_portfolio(engine: "SimulatorEngine", profile: InvestorProfile) -> None
         "transaction_log":    portfolio.transaction_log,
         "market_cycle":       engine.market.cycle,
         "market_selic":       engine.market.selic_annual,
-        "deposit_done_cycle": -1,   # reset; App will repopulate
+        "deposit_done_cycle": deposit_done_cycle,
     }
 
     _PROFILES_DIR.mkdir(parents=True, exist_ok=True)
@@ -344,7 +350,7 @@ class App(ctk.CTk):
                 self._engine.create_portfolio(profile, initial_cash=profile.monthly_surplus)
                 self._salary_deposited = True   # initial cash counts as first deposit
                 _save_profile(profile)
-                _save_portfolio(self._engine, profile)
+                _save_portfolio(self._engine, profile, self._deposit_done_for_cycle)
                 self._transition(AppState.HUB)
 
             return CreateProfilePage(
@@ -522,7 +528,7 @@ class App(ctk.CTk):
                     return
                 try:
                     self._engine.buy_fixed(p, ft, amount)
-                    if self._profile: _save_portfolio(self._engine, self._profile)
+                    if self._profile: _save_portfolio(self._engine, self._profile, self._deposit_done_for_cycle)
                 except ValueError as exc:
                     print(f"[LOW RISK] Erro ao investir: {exc}")
                 self._transition(AppState.SIMULATOR_MAIN)
@@ -534,7 +540,7 @@ class App(ctk.CTk):
                     return
                 try:
                     self._engine.redeem_fixed(p, position_index)
-                    if self._profile: _save_portfolio(self._engine, self._profile)
+                    if self._profile: _save_portfolio(self._engine, self._profile, self._deposit_done_for_cycle)
                 except ValueError as exc:
                     print(f"[LOW RISK] Erro ao resgatar: {exc}")
                 self._transition(AppState.SIMULATOR_MAIN)
@@ -572,7 +578,7 @@ class App(ctk.CTk):
                     try:
                         self._engine.buy_stock(p, ticker, amount)
                         print(f"[HIGH RISK] Comprado R$ {amount:.2f} de {ticker}")
-                        if self._profile: _save_portfolio(self._engine, self._profile)
+                        if self._profile: _save_portfolio(self._engine, self._profile, self._deposit_done_for_cycle)
                     except Exception as e:
                         print(f"[HIGH RISK] Erro ao comprar: {e}")
                 self._transition(AppState.SIMULATOR_MAIN)
@@ -583,7 +589,7 @@ class App(ctk.CTk):
                     try:
                         proceeds = self._engine.sell_stock(p, ticker, shares)
                         print(f"[HIGH RISK] Vendido {shares} cotas de {ticker} → R$ {proceeds:.2f}")
-                        if self._profile: _save_portfolio(self._engine, self._profile)
+                        if self._profile: _save_portfolio(self._engine, self._profile, self._deposit_done_for_cycle)
                     except Exception as e:
                         print(f"[HIGH RISK] Erro ao vender: {e}")
                 self._transition(AppState.SIMULATOR_MAIN)
@@ -682,7 +688,7 @@ class App(ctk.CTk):
             if self._engine:
                 result = self._engine.advance_cycle()
                 self._last_cycle_result = result
-                if self._profile: _save_portfolio(self._engine, self._profile)
+                if self._profile: _save_portfolio(self._engine, self._profile, self._deposit_done_for_cycle)
             # Reset salary flag for the new cycle
             self._salary_deposited = False
 
