@@ -42,6 +42,7 @@ class CreateProfilePage(ctk.CTkFrame):
         self.income_entry: ctk.CTkEntry
         self.outcomes_entry: ctk.CTkEntry
         self.goal_entry: ctk.CTkEntry
+        self.goal_var: ctk.StringVar
         self.risk_var: ctk.StringVar
         self.knowledge_var: ctk.StringVar
         self._build()
@@ -52,14 +53,15 @@ class CreateProfilePage(ctk.CTkFrame):
 
     # Free-text fields: (attr, label, placeholder)
     _FIELDS = [
-        ("name_entry",     "Nome",                "Ex: João Silva"),
-        ("income_entry",   "Renda mensal (R$)",   "Ex: 5000.00"),
-        ("outcomes_entry", "Gastos mensais (R$)", "Ex: 3000.00"),
+        ("name_entry",     "Nome",                   "Ex: João Silva"),
+        ("income_entry",   "Renda mensal (R$)",      "Ex: 5000.00"),
+        ("outcomes_entry", "Gastos mensais (R$)",    "Ex: 3000.00"),
         ("goal_entry",     "Objetivo em reais (R$)", "Ex: 100000.00"),
     ]
 
     # Dropdown fields: (var_attr, label, options)
     _DROPDOWNS = [
+        ("goal_var",      "Objetivo financeiro",    ["Independência financeira", "Aquisição de capital", "Preparação para aposentadoria", "Outro"]),
         ("risk_var",      "Perfil de risco",        ["conservador", "moderado", "arrojado"]),
         ("knowledge_var", "Nível de conhecimento",  ["iniciante", "intermediário", "avançado"]),
     ]
@@ -165,12 +167,13 @@ class CreateProfilePage(ctk.CTkFrame):
     # -----------------------------------------------------------------------
 
     def _on_confirm(self):
-        name        = self.name_entry.get().strip()
-        income_raw  = self.income_entry.get().strip().replace(",", ".")
+        name         = self.name_entry.get().strip()
+        income_raw   = self.income_entry.get().strip().replace(",", ".")
         outcomes_raw = self.outcomes_entry.get().strip().replace(",", ".")
-        goal_raw    = self.goal_entry.get().strip().replace(",", ".")
-        risk        = self.risk_var.get()
-        knowledge   = self.knowledge_var.get()
+        goal_raw     = self.goal_entry.get().strip().replace(",", ".")
+        goal         = self.goal_var.get()
+        risk         = self.risk_var.get()
+        knowledge    = self.knowledge_var.get()
 
         # Validação
         if not name:
@@ -210,7 +213,7 @@ class CreateProfilePage(ctk.CTkFrame):
             monthly_expenses=outcomes,
             risk_profile=risk,
             knowledge_level=knowledge,
-            goal="Independência financeira",
+            goal=goal,
             goal_amount=goal_amount,
             goal_deadline_months=12,
         )

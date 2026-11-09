@@ -373,10 +373,13 @@ class App(ctk.CTk):
             assert self._profile is not None  # only reachable from HUB which requires a profile
             _profile = self._profile
 
-            def on_edit_save(name: str, income: float, expenses: float):
+            def on_edit_save(name: str, income: float, expenses: float, goal: str, goal_amount: float, goal_deadline: int):
                 _profile.name = name
                 _profile.monthly_income = income
                 _profile.monthly_expenses = expenses
+                _profile.goal = goal
+                _profile.goal_amount = goal_amount
+                _profile.goal_deadline_months = goal_deadline
                 _save_profile(_profile)
                 self._transition(AppState.HUB)
 

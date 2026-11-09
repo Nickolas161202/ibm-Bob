@@ -130,7 +130,7 @@ class HubPage(ctk.CTkFrame):
             row=2,
             icon="⚙️",
             title="Editar Perfil",
-            subtitle="Atualize seu nome, renda ou gastos mensais",
+            subtitle="Atualize seu nome, renda, gastos ou meta financeira",
             command=self._on_reconfigure,
             accent=False,
         )

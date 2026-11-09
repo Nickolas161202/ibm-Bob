@@ -27,13 +27,13 @@ Campos exibidos:
   - Gastos mensais (monthly_expenses)
 """
 class EditIncomePage(ctk.CTkFrame):
-    """Frame de edição de perfil — atualiza nome, income e expenses do perfil."""
+    """Frame de edição de perfil — atualiza nome, income, expenses e meta financeira."""
 
     def __init__(
         self,
         master,
         profile: InvestorProfile,
-        on_save: Callable[[str, float, float], None],
+        on_save: Callable[[str, float, float, str, float, int], None],
         on_cancel: Callable | None = None,
         **kwargs,
     ):
@@ -41,7 +41,9 @@ class EditIncomePage(ctk.CTkFrame):
         Args:
             master:     Widget pai.
             profile:    Perfil atual do investidor (usado como valores iniciais).
-            on_save:    Callback chamado com (novo_nome, nova_renda, novos_gastos) ao salvar.
+            on_save:    Callback chamado com
+                        (novo_nome, nova_renda, novos_gastos, novo_objetivo, nova_meta_r, novo_prazo_meses)
+                        ao salvar.
             on_cancel:  Callback chamado ao cancelar (volta para a tela anterior).
         """
         super().__init__(master, **kwargs)
@@ -62,23 +64,30 @@ class EditIncomePage(ctk.CTkFrame):
         muted_font  = ctk.CTkFont(size=12)
 
         self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+
+        # ── Scrollable container ──────────────────────────────────────────────
+        scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
+        scroll.grid(row=0, column=0, sticky="nsew")
+        scroll.grid_columnconfigure(0, weight=1)
+        _s = scroll   # alias para legibilidade
 
         # ── Título ────────────────────────────────────────────────────────────
         ctk.CTkLabel(
-            self,
+            _s,
             text="Editar Perfil",
             font=title_font,
         ).grid(row=0, column=0, padx=40, pady=(48, 4))
 
         ctk.CTkLabel(
-            self,
-            text="Atualize seu nome, renda e gastos mensais",
+            _s,
+            text="Atualize seu nome, renda, gastos e meta financeira",
             font=ctk.CTkFont(size=13),
             text_color="gray",
         ).grid(row=1, column=0, padx=40, pady=(0, 28))
 
         # ── Formulário ────────────────────────────────────────────────────────
-        form_frame = ctk.CTkFrame(self, fg_color="transparent")
+        form_frame = ctk.CTkFrame(_s, fg_color="transparent")
         form_frame.grid(row=2, column=0, padx=60, pady=0, sticky="ew")
         form_frame.grid_columnconfigure(1, weight=1)
 
@@ -132,19 +141,98 @@ class EditIncomePage(ctk.CTkFrame):
         self._expenses_entry.insert(0, f"{self._profile.monthly_expenses:.2f}")
         self._expenses_entry.bind("<KeyRelease>", lambda e: self._update_surplus_preview())
 
+        # ── Separador visual ──────────────────────────────────────────────────
+        ctk.CTkFrame(_s, height=1, fg_color="gray30").grid(
+            row=3, column=0, padx=60, pady=(20, 0), sticky="ew"
+        )
+        ctk.CTkLabel(
+            _s,
+            text="🎯  Meta Financeira",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color="gray",
+        ).grid(row=4, column=0, padx=60, pady=(12, 8), sticky="w")
+
+        # ── Campos de meta ────────────────────────────────────────────────────
+        _GOAL_OPTIONS = [
+            "Independência financeira",
+            "Aquisição de capital",
+            "Preparação para aposentadoria",
+            "Outro",
+        ]
+
+        goal_frame = ctk.CTkFrame(_s, fg_color="transparent")
+        goal_frame.grid(row=5, column=0, padx=60, pady=0, sticky="ew")
+        goal_frame.grid_columnconfigure(1, weight=1)
+
+        # Objetivo (dropdown)
+        ctk.CTkLabel(
+            goal_frame,
+            text="Objetivo financeiro",
+            font=label_font,
+            anchor="w",
+        ).grid(row=0, column=0, padx=(0, 16), pady=(0, 6), sticky="w")
+
+        current_goal = (
+            self._profile.goal
+            if self._profile.goal in _GOAL_OPTIONS
+            else "Outro"
+        )
+        self._goal_var = ctk.StringVar(value=current_goal)
+        ctk.CTkOptionMenu(
+            goal_frame,
+            variable=self._goal_var,
+            values=_GOAL_OPTIONS,
+            height=38,
+        ).grid(row=0, column=1, pady=(0, 6), sticky="ew")
+
+        # Valor da meta
+        ctk.CTkLabel(
+            goal_frame,
+            text="Valor da meta (R$)",
+            font=label_font,
+            anchor="w",
+        ).grid(row=1, column=0, padx=(0, 16), pady=(12, 6), sticky="w")
+
+        self._goal_amount_entry = ctk.CTkEntry(
+            goal_frame,
+            placeholder_text="Ex: 100000.00",
+            height=38,
+        )
+        self._goal_amount_entry.grid(row=1, column=1, pady=(12, 6), sticky="ew")
+        self._goal_amount_entry.insert(0, f"{self._profile.goal_amount:.2f}")
+
+        # Prazo em meses
+        ctk.CTkLabel(
+            goal_frame,
+            text="Prazo (meses)",
+            font=label_font,
+            anchor="w",
+        ).grid(row=2, column=0, padx=(0, 16), pady=(12, 6), sticky="w")
+
+        self._goal_deadline_entry = ctk.CTkEntry(
+            goal_frame,
+            placeholder_text="Ex: 24",
+            height=38,
+        )
+        self._goal_deadline_entry.grid(row=2, column=1, pady=(12, 6), sticky="ew")
+        self._goal_deadline_entry.insert(0, str(self._profile.goal_deadline_months))
+
         # Guarda os valores originais para o botão de reset
-        self._original_name     = self._profile.name
-        self._original_income   = self._profile.monthly_income
-        self._original_expenses = self._profile.monthly_expenses
+        self._original_name             = self._profile.name
+        self._original_income           = self._profile.monthly_income
+        self._original_expenses         = self._profile.monthly_expenses
+        self._original_goal             = current_goal
+        self._original_goal_amount      = self._profile.goal_amount
+        self._original_goal_deadline    = self._profile.goal_deadline_months
 
         # ── Card informativo: saldo disponível atual ──────────────────────────
-        info_card = ctk.CTkFrame(self, corner_radius=10)
-        info_card.grid(row=3, column=0, padx=60, pady=(20, 0), sticky="ew")
+        info_card = ctk.CTkFrame(_s, corner_radius=10)
+        info_card.grid(row=6, column=0, padx=60, pady=(20, 0), sticky="ew")
         info_card.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(
             info_card,
-            text="💡  Saldo disponível para investimento (atual)",
+            text="💡  Saldo disponível para investimento",
             font=muted_font,
             text_color="gray",
         ).grid(row=0, column=0, padx=16, pady=(12, 2))
@@ -158,18 +246,18 @@ class EditIncomePage(ctk.CTkFrame):
 
         # ── Mensagem de erro ──────────────────────────────────────────────────
         ctk.CTkLabel(
-            self,
+            _s,
             textvariable=self._error_text,
             text_color="#e05c5c",
             font=ctk.CTkFont(size=12),
-        ).grid(row=4, column=0, padx=40, pady=(14, 0))
+        ).grid(row=7, column=0, padx=40, pady=(14, 0))
 
         # Popula o label de saldo assim que a UI está montada
         self._update_surplus_preview()
 
         # ── Botões ────────────────────────────────────────────────────────────
-        btn_frame = ctk.CTkFrame(self, fg_color="transparent")
-        btn_frame.grid(row=5, column=0, padx=40, pady=(20, 52))
+        btn_frame = ctk.CTkFrame(_s, fg_color="transparent")
+        btn_frame.grid(row=8, column=0, padx=40, pady=(20, 52))
 
         ctk.CTkButton(
             btn_frame,
@@ -230,6 +318,11 @@ class EditIncomePage(ctk.CTkFrame):
         self._income_entry.insert(0, f"{self._original_income:.2f}")
         self._expenses_entry.delete(0, "end")
         self._expenses_entry.insert(0, f"{self._original_expenses:.2f}")
+        self._goal_var.set(self._original_goal)
+        self._goal_amount_entry.delete(0, "end")
+        self._goal_amount_entry.insert(0, f"{self._original_goal_amount:.2f}")
+        self._goal_deadline_entry.delete(0, "end")
+        self._goal_deadline_entry.insert(0, str(self._original_goal_deadline))
         self._error_text.set("")
         self._update_surplus_preview()
 
@@ -238,9 +331,12 @@ class EditIncomePage(ctk.CTkFrame):
     # -------------------------------------------------------------------------
 
     def _on_confirm(self):
-        name         = self._name_entry.get().strip()
-        income_raw   = self._income_entry.get().strip().replace(",", ".")
-        expenses_raw = self._expenses_entry.get().strip().replace(",", ".")
+        name              = self._name_entry.get().strip()
+        income_raw        = self._income_entry.get().strip().replace(",", ".")
+        expenses_raw      = self._expenses_entry.get().strip().replace(",", ".")
+        goal              = self._goal_var.get()
+        goal_amount_raw   = self._goal_amount_entry.get().strip().replace(",", ".")
+        goal_deadline_raw = self._goal_deadline_entry.get().strip()
 
         if not name:
             self._error_text.set("⚠  Por favor, informe seu nome.")
@@ -262,8 +358,24 @@ class EditIncomePage(ctk.CTkFrame):
             self._error_text.set("⚠  Gastos mensais inválidos. Use um número positivo.")
             return
 
+        try:
+            goal_amount = float(goal_amount_raw)
+            if goal_amount <= 0:
+                raise ValueError
+        except ValueError:
+            self._error_text.set("⚠  Valor da meta inválido. Use um número positivo.")
+            return
+
+        try:
+            goal_deadline = int(goal_deadline_raw)
+            if goal_deadline <= 0:
+                raise ValueError
+        except ValueError:
+            self._error_text.set("⚠  Prazo inválido. Informe um número inteiro de meses positivo.")
+            return
+
         self._error_text.set("")
-        self._on_save(name, income, expenses)
+        self._on_save(name, income, expenses, goal, goal_amount, goal_deadline)
 
 
 # -----------------------------------------------------------------------------
@@ -306,7 +418,10 @@ if __name__ == "__main__":
     EditIncomePage(
         master=root,
         profile=_profile,
-        on_save=lambda name, inc, exp: print(f"Salvo — Nome: {name}  Renda: R$ {inc:.2f}  Gastos: R$ {exp:.2f}"),
+        on_save=lambda name, inc, exp, goal, goal_r, deadline: print(
+            f"Salvo — Nome: {name}  Renda: R$ {inc:.2f}  Gastos: R$ {exp:.2f}"
+            f"  Objetivo: {goal}  Meta: R$ {goal_r:.2f}  Prazo: {deadline} meses"
+        ),
         on_cancel=lambda: print("Cancelado"),
         fg_color="transparent",
     ).pack(fill="both", expand=True)
