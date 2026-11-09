@@ -685,7 +685,7 @@ Retorne SOMENTE o JSON abaixo, sem texto adicional:
         q_defeat    = quest.get("defeat_condition", "")
         q_cycles    = quest.get("cycles_played", 1)
 
-        # ── Actions summary ──────────────────────────────────────────────────
+        # ── Actions summary — grouped by cycle with temporal labels ──────────
         _labels = {
             "deposit":      "Depósito",
             "withdraw":     "Saque",
@@ -694,19 +694,55 @@ Retorne SOMENTE o JSON abaixo, sem texto adicional:
             "buy_stock":    "Compra de Ação",
             "sell_stock":   "Venda de Ação",
         }
-        action_lines = []
-        for i, a in enumerate(actions, 1):
-            lbl    = _labels.get(a.get("action", ""), a.get("action", ""))
-            amount = a.get("amount", 0.0)
-            extra  = ""
-            if a.get("ticker"):
-                extra += f" | ativo: {a['ticker']}"
-            if a.get("shares") is not None:
-                extra += f" | {a['shares']:.4f} cotas"
-            if a.get("price") is not None:
-                extra += f" @ R$ {a['price']:.2f}"
-            action_lines.append(f"  {i:>2}. [{lbl}]  R$ {amount:.2f}{extra}")
-        actions_block = "\n".join(action_lines) or "  (nenhuma ação realizada)"
+
+        # Group actions by cycle value
+        from collections import defaultdict
+        actions_by_cycle: dict = defaultdict(list)
+        for a in actions:
+            actions_by_cycle[a.get("cycle", 0)].append(a)
+
+        # Build the block with temporal labels per cycle group
+        current_cycle = portfolio_snapshot.get("cycle", max(actions_by_cycle.keys(), default=0))
+        sorted_cycles = sorted(actions_by_cycle.keys())
+
+        cycle_blocks = []
+        for cyc in sorted_cycles:
+            # Label the cycle relative to the current one
+            delta = current_cycle - cyc
+            if delta == 0:
+                temporal_label = f"★ MÊS ATUAL (ciclo {cyc}) — DECISÕES NOVAS DO USUÁRIO"
+                header_note    = "    ↳ Estas são as decisões REAIS e RECENTES que devem ser avaliadas."
+            elif delta == 1:
+                temporal_label = f"  MÊS ANTERIOR (ciclo {cyc}) — HISTÓRICO"
+                header_note    = "    ↳ Histórico do mês passado, para contexto comparativo apenas."
+            else:
+                temporal_label = f"  MÊS {cyc} (há {delta} meses) — HISTÓRICO"
+                header_note    = "    ↳ Histórico mais antigo, para análise de tendência apenas."
+
+            cycle_action_lines = []
+            for i, a in enumerate(actions_by_cycle[cyc], 1):
+                lbl    = _labels.get(a.get("action", ""), a.get("action", ""))
+                amount = a.get("amount", 0.0)
+                extra  = ""
+                if a.get("ticker"):
+                    extra += f" | ativo: {a['ticker']}"
+                if a.get("shares") is not None:
+                    extra += f" | {a['shares']:.4f} cotas"
+                if a.get("price") is not None:
+                    extra += f" @ R$ {a['price']:.2f}"
+                cycle_action_lines.append(f"    {i:>2}. [{lbl}]  R$ {amount:.2f}{extra}")
+
+            cycle_blocks.append(
+                f"  {temporal_label}\n"
+                f"{header_note}\n"
+                + "\n".join(cycle_action_lines)
+            )
+
+        actions_block = (
+            "\n\n".join(cycle_blocks)
+            if cycle_blocks
+            else "  (nenhuma ação realizada)"
+        )
 
         # ── Portfolio final ──────────────────────────────────────────────────
         nw     = portfolio_snapshot.get("net_worth", 0.0)
@@ -759,7 +795,14 @@ CONDIÇÃO DE VITÓRIA: {q_victory}
 CONDIÇÃO DE DERROTA: {q_defeat}
 DURAÇÃO: {q_cycles} ciclo(s)
 
-AÇÕES DO USUÁRIO NESTA QUEST:
+AÇÕES DO USUÁRIO (organizadas por mês):
+ATENÇÃO — LEITURA OBRIGATÓRIA ANTES DE AVALIAR:
+  • As ações estão agrupadas por mês (ciclo).
+  • O grupo marcado com ★ MÊS ATUAL contém as NOVAS DECISÕES do usuário — são estas que devem ser avaliadas.
+  • Os grupos "MÊS ANTERIOR" e "MÊS Nº (há X meses)" são HISTÓRICO para contexto comparativo.
+    NÃO interprete ações históricas como se tivessem sido realizadas novamente agora.
+    Use o histórico apenas para identificar padrões e evolução do comportamento ao longo do tempo.
+
 {actions_block}
 
 ESTADO FINAL DO PORTFÓLIO:
@@ -775,14 +818,14 @@ HISTÓRICO DE INFERÊNCIAS ANTERIORES:
 {history_block}
 
 ---
-Analise o comportamento real do usuário nas ações acima e compare com o seu perfil declarado.
+Avalie com base nas NOVAS DECISÕES do mês atual (★). Use o histórico para entender tendências.
 Considere:
-  - Como o usuário alocou os recursos (diversificação, proporção renda fixa/variável)
+  - Como o usuário alocou os recursos no mês atual (diversificação, proporção renda fixa/variável)
   - Se respeitou a reserva de emergência
   - Se agiu de forma coerente com o perfil declarado ou demonstrou comportamento diferente
-  - Evolução em relação às inferências anteriores (se houver)
-  - Em que grau o usuário cumpriu o objetivo da quest (condição de vitória vs derrota). Caso o usuário não cumpra o solicitado,
-    Sua nota deve ser afetada drasticamente
+  - Evolução em relação às inferências anteriores e ao histórico de ações (se houver)
+  - Em que grau o usuário cumpriu o objetivo da quest (condição de vitória vs derrota) com as ações DO MÊS ATUAL.
+    Caso o usuário não cumpra o solicitado, a nota deve ser afetada drasticamente.
 Retorne SOMENTE o JSON abaixo, sem texto adicional:
 
 {{
@@ -951,12 +994,14 @@ CONTEXTO DE META:
   Poupança necessária/mês: R$ {goal_urgency.get("required_monthly_saving", 0.0):,.2f}
   Na trilha            : {"Sim — ritmo de poupança é suficiente" if goal_urgency.get("on_track") else "Não — usuário precisa poupar mais para atingir a meta no prazo"}
 
-COMPORTAMENTO RECENTE:
-  Ciclos analisados    : {recent_behavior.get("cycles_analyzed", 0)}
-  Operações realizadas : {recent_behavior.get("trade_count", 0)}
-  Ciclos entesourando  : {recent_behavior.get("cash_hoard_cycles", 0)} (caixa > 50% do patrimônio)
-  % média em caixa     : {recent_behavior.get("avg_cash_pct", 0.0):.1f}%
-  Classe dominante     : {recent_behavior.get("dominant_asset_class", "caixa")}
+COMPORTAMENTO RECENTE (últimos {recent_behavior.get("cycles_analyzed", 0)} meses — HISTÓRICO TEMPORAL):
+ATENÇÃO: estes dados são um resumo do histórico de comportamento do usuário ao longo dos meses.
+  NÃO interprete estes dados como se o usuário tivesse realizado essas ações agora — são padrões acumulados.
+  Use o histórico apenas para personalizar o tema e a dificuldade da próxima quest.
+  Operações totais no período : {recent_behavior.get("trade_count", 0)}
+  Meses com entesouramento    : {recent_behavior.get("cash_hoard_cycles", 0)} (meses em que caixa > 50% do patrimônio)
+  % média em caixa no período : {recent_behavior.get("avg_cash_pct", 0.0):.1f}%
+  Classe de ativo dominante   : {recent_behavior.get("dominant_asset_class", "caixa")}
 
 HISTÓRICO DE APRENDIZADO:
   {score_line}
@@ -977,7 +1022,7 @@ INSTRUÇÕES:
 - Defina metas numéricas realistas com base na sobra mensal de R$ {monthly_surplus:,.2f}.
 - NÃO repita como tema principal nenhum dos tópicos já dominados.
 - Use o CONTEXTO DE META para calibrar o valor objetivo da quest: se o usuário está atrasado (fora da trilha), aumente a urgência e o valor-alvo; se está adiantado, introduza mais complexidade.
-- Use o COMPORTAMENTO RECENTE para criar uma narrativa personalizada: referencie padrões detectados (ex: entesouramento, concentração, frequência de trades) na contextualização da quest.
+- Use o COMPORTAMENTO RECENTE para criar uma narrativa personalizada com base em padrões históricos (ex: entesouramento, concentração, frequência de trades). IMPORTANTE: esses dados refletem comportamentos passados — não ações realizadas agora. Gere uma quest que incentive melhorias em relação a esses padrões.
 Retorne SOMENTE o JSON abaixo, sem texto adicional, sem markdown, sem comentários:
 
 {{
