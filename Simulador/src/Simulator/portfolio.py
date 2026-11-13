@@ -199,6 +199,13 @@ class Portfolio:
         self.cash -= amount
         self._log(cycle, "withdraw", amount, note=note)
 
+    def force_withdraw(self, amount: float, cycle: int, note: str = "Despesa forçada"):
+        """Deduz `amount` do caixa sem verificar saldo — caixa pode ficar negativo."""
+        if amount <= 0:
+            raise ValueError("Valor deve ser positivo.")
+        self.cash -= amount
+        self._log(cycle, "force_withdraw", amount, note=note)
+
     # -----------------------------------------------------------------------
     # Renda Fixa
     # -----------------------------------------------------------------------

@@ -744,6 +744,22 @@ class Engine:
                              "com uma decisão financeira concreta.",
         }.get(quest_type.lower(), quest_type)
 
+        # Only inject the simulator_events instruction for "evento" quests.
+        if quest_type.lower() == "evento":
+            evento_events_section = (
+                "\nEVENTOS DO SIMULADOR (EXCLUSIVO PARA TIPO EVENTO):\n"
+                "Como esta é uma quest do tipo EVENTO, você DEVE incluir o campo \"simulator_events\"\n"
+                "no JSON de resposta. Defina 1 ou 2 eventos de caixa que ocorrem automaticamente\n"
+                "quando o jogador inicia a quest:\n"
+                "  • \"income_bonus\"  — depósito extra no caixa (ex: bônus, herança, freelance)\n"
+                "  • \"expense_shock\" — dedução do caixa (ex: carro quebrou, despesa médica)\n"
+                "Os valores devem ser proporcionais à renda mensal do jogador.\n"
+                "A narrativa (context) da quest DEVE mencionar esses eventos para que o jogador\n"
+                "entenda o que aconteceu ao iniciar a missão.\n"
+            )
+        else:
+            evento_events_section = ""
+
         name             = user_profile.get("name", "Usuário")
         monthly_income   = user_profile.get("monthly_income", 0.0)
         monthly_expenses = user_profile.get("monthly_expenses", 0.0)
@@ -815,6 +831,7 @@ class Engine:
             "quest", "generate_quest",
             quest_type_upper=quest_type.upper(),
             quest_type_rules=quest_type_rules,
+            evento_events_section=evento_events_section,
             monthly_surplus=monthly_surplus,
             name=name,
             inferred_risk=inferred_risk,

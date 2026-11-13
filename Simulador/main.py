@@ -443,6 +443,32 @@ class App(ctk.CTk):
                     if self._engine and portfolio:
                         self._quest_start_snapshot = self._engine.snapshot(portfolio)
                         self._quest_start_log_len  = len(portfolio.transaction_log)
+
+                    # ── Apply simulator events for "evento" quests ────────────
+                    applied: list[dict] = []
+                    if (
+                        quest_data.get("type") == "evento"
+                        and self._engine
+                        and portfolio
+                    ):
+                        for ev in quest_data.get("simulator_events", []):
+                            try:
+                                ev_type = ev.get("type", "")
+                                amount  = float(ev.get("amount", 0))
+                                desc    = ev.get("description", "Evento")
+                                if ev_type not in ("income_bonus", "expense_shock"):
+                                    continue
+                                if amount <= 0:
+                                    continue
+                                self._engine.apply_event(portfolio, ev_type, amount, desc)
+                                applied.append({"type": ev_type, "amount": amount, "description": desc})
+                            except Exception as exc:
+                                print(f"[EVENTO] Falha ao aplicar evento {ev}: {exc}")
+                        if applied:
+                            self._active_quest["applied_events"] = applied
+                            if self._profile:
+                                _save_portfolio(self._engine, self._profile, self._deposit_done_for_cycle)
+
                     self._transition(AppState.SIMULATOR_MAIN)
 
                 self._replace_loading(QuestGeneratedPage(

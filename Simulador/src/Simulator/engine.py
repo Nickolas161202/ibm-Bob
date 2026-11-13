@@ -130,6 +130,26 @@ class SimulatorEngine:
     def deposit(self, portfolio: Portfolio, amount: float, note: str = "Depósito mensal"):
         return portfolio.deposit(amount, self.market.cycle, note)
 
+    def apply_event(
+        self,
+        portfolio: Portfolio,
+        event_type: str,
+        amount: float,
+        note: str = "Evento",
+    ) -> None:
+        """
+        Aplica um evento de simulador ao portfólio:
+          - "income_bonus"  → depósito extra (caixa aumenta)
+          - "expense_shock" → dedução forçada (caixa pode ficar negativo)
+        Lança ValueError para tipos desconhecidos ou valores inválidos.
+        """
+        if event_type == "income_bonus":
+            portfolio.deposit(amount, self.market.cycle, note)
+        elif event_type == "expense_shock":
+            portfolio.force_withdraw(amount, self.market.cycle, note)
+        else:
+            raise ValueError(f"Tipo de evento desconhecido: {event_type!r}")
+
     # -----------------------------------------------------------------------
     # Snapshots
     # -----------------------------------------------------------------------

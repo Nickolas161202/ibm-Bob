@@ -94,12 +94,15 @@ class MainPage(ctk.CTkFrame):
         # ── Missão ativa ─────────────────────────────────────────────────────
         self._build_quest_card(parent=_s, row=3)
 
+        # ── Eventos do simulador (apenas quests "evento" com applied_events) ──
+        self._build_event_banner(parent=_s, row=4)
+
         # ── Holdings (scrollable) ─────────────────────────────────────────────
-        self._build_holdings(parent=_s, row=4)
+        self._build_holdings(parent=_s, row=5)
 
         # ── Botões de ação ───────────────────────────────────────────────────
         actions_frame = ctk.CTkFrame(_s, fg_color="transparent")
-        actions_frame.grid(row=5, column=0, padx=40, pady=(14, 0), sticky="ew")
+        actions_frame.grid(row=6, column=0, padx=40, pady=(14, 0), sticky="ew")
         actions_frame.grid_columnconfigure((0, 1), weight=1)
 
         ctk.CTkButton(
@@ -131,7 +134,46 @@ class MainPage(ctk.CTkFrame):
             fg_color="#5a7a3a",
             hover_color="#4a6a2a",
             command=self._on_end_month,
-        ).grid(row=6, column=0, padx=40, pady=(16, 28))
+        ).grid(row=7, column=0, padx=40, pady=(16, 28))
+
+    def _build_event_banner(self, parent: ctk.CTkFrame, row: int):
+        """Renders a banner listing simulator events applied at the start of an evento quest."""
+        events = self._active_quest.get("applied_events", [])
+        if not events:
+            return
+
+        card = ctk.CTkFrame(parent, corner_radius=10)
+        card.grid(row=row, column=0, padx=40, pady=(10, 0), sticky="ew")
+        card.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            card,
+            text="⚡  Eventos deste Mês",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color="#f5a623",
+            anchor="w",
+        ).grid(row=0, column=0, padx=16, pady=(10, 4), sticky="w")
+
+        for i, ev in enumerate(events):
+            ev_type   = ev.get("type", "")
+            amount    = ev.get("amount", 0.0)
+            desc      = ev.get("description", "Evento")
+            if ev_type == "income_bonus":
+                icon      = "↑"
+                sign      = "+"
+                color     = "#4caf50"
+            else:  # expense_shock
+                icon      = "↓"
+                sign      = "-"
+                color     = "#e05c5c"
+
+            ctk.CTkLabel(
+                card,
+                text=f"{icon}  {sign}R$ {amount:,.2f}  —  {desc}",
+                font=ctk.CTkFont(size=13),
+                text_color=color,
+                anchor="w",
+            ).grid(row=i + 1, column=0, padx=24, pady=(0, 2 if i < len(events) - 1 else 10), sticky="w")
 
     def _build_quest_card(self, parent: ctk.CTkFrame, row: int):
         """Renders the active quest card, if a quest is set."""
