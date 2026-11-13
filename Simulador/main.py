@@ -1227,7 +1227,7 @@ class App(ctk.CTk):
         if not self._profile or not portfolio:
             return {}
 
-        # Only actions taken DURING this quest
+        # ── Fix E: actions scoped to this quest only (quest-start index) ─────
         actions = portfolio.transaction_log[self._quest_start_log_len:]
 
         current_profile = {
@@ -1248,22 +1248,38 @@ class App(ctk.CTk):
             for e in self._inference_state.history
         ]
 
-        # ── Sub-Task 2: AI quest evaluation ──────────────────────────────────
-        # Use last-3-cycles window, same as the behavioural summary
+        # ── Fix E: cycles_played derived from quest-start snapshot ────────────
         current_cycle = snap.get("cycle", 0)
-        cutoff = max(0, current_cycle - 2)
-        actions = [
-            e for e in portfolio.transaction_log
-            if e.get("cycle", 0) >= cutoff
-        ]
+        start_cycle   = (self._quest_start_snapshot or {}).get("cycle", current_cycle)
+        cycles_played = max(1, current_cycle - start_cycle + 1)
+
+        # Stamp cycles_played onto the quest dict so the prompt sees it
+        quest_for_eval = {**self._active_quest, "cycles_played": cycles_played}
 
         try:
             api_key = os.environ.get("BOB_API_KEY", "")
             bob = Bob(email="", password=api_key)
             bob.login()
             ai = AiEngine(bob)
+
+            # ── Fix B: prime Bob with the player's financial profile ──────────
+            ai.initialize_session(
+                name=self._profile.name,
+                incomes=[{"source": "Renda mensal", "amount": self._profile.monthly_income}],
+                outcomes=[{"category": "Gastos fixos", "amount": self._profile.monthly_expenses}],
+                debts=[],
+            )
+
+            # ── Fix C: send the market + portfolio context at quest start ─────
+            if self._quest_start_snapshot and self._engine:
+                start_ctx = {**self._quest_start_snapshot, **self._engine.market_snapshot()}
+                ai.send_simulator_context(start_ctx)
+
+            # ── Fix D: remind Bob of the quest it generated ───────────────────
+            ai.send_quest_context(quest_for_eval, cycles_played=cycles_played)
+
             raw = ai.analyze_quest_performance(
-                quest=self._active_quest,
+                quest=quest_for_eval,
                 actions=actions,
                 portfolio_snapshot=snap,
                 current_profile=current_profile,

@@ -273,6 +273,62 @@ class Engine:
         )
         return self._bob.send_prompt(prompt)
 
+    def send_quest_context(self, quest: dict, cycles_played: int = 1) -> str:
+        """
+        Primes Bob with the full quest that was assigned to the user so it has
+        complete context when asked to evaluate performance.
+
+        Should be called after initialize_session() and send_simulator_context(),
+        and before analyze_quest_performance().
+
+        Parameters
+        ----------
+        quest         : the active quest dict (title, type, objective, etc.)
+        cycles_played : how many cycles the quest spanned
+        """
+        q_type = quest.get("type", "acumulação")
+        q_type_label = {
+            "acumulação":    "Acumulação  (maximizar lucro, minimizar risco)",
+            "sobrevivência": "Sobrevivência  (minimizar perdas)",
+            "evento":        "Evento especial  (reação a uma situação imprevista)",
+        }.get(q_type.lower(), q_type)
+
+        # Build an optional block describing simulator events for "evento" quests
+        applied_events = quest.get("applied_events", [])
+        if applied_events:
+            ev_lines = []
+            for ev in applied_events:
+                ev_type = ev.get("type", "")
+                amount  = ev.get("amount", 0.0)
+                desc    = ev.get("description", "Evento")
+                if ev_type == "income_bonus":
+                    ev_lines.append(f"    ↑ +R$ {amount:,.2f}  — {desc}  (depósito extra aplicado ao caixa)")
+                else:
+                    ev_lines.append(f"    ↓ -R$ {amount:,.2f}  — {desc}  (dedução forçada; caixa pode ter ficado negativo)")
+            q_events_block = (
+                "\n\nEVENTOS DO SIMULADOR APLICADOS AO INICIAR A QUEST:\n"
+                "  ATENÇÃO: estes eventos afetaram o caixa do jogador AUTOMATICAMENTE ao clicar em Iniciar.\n"
+                "  O jogador NÃO escolheu esses eventos — eles fazem parte do cenário.\n"
+                "  Avalie a REAÇÃO do jogador a estes eventos, não os eventos em si.\n"
+                + "\n".join(ev_lines)
+            )
+        else:
+            q_events_block = ""
+
+        prompt = self._prompts.format(
+            "session", "send_quest_context",
+            q_title=quest.get("title", "Quest"),
+            q_type_label=q_type_label,
+            q_objective=quest.get("objective", ""),
+            q_victory=quest.get("victory_condition", ""),
+            q_defeat=quest.get("defeat_condition", ""),
+            q_context=quest.get("context", ""),
+            q_tip=quest.get("initial_tip", ""),
+            q_cycles=cycles_played,
+            q_events_block=q_events_block,
+        )
+        return self._bob.send_prompt(prompt)
+
     def send_debriefing_request(
         self,
         quest_type: str,
