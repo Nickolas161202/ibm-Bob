@@ -7,9 +7,9 @@ Exibe os produtos disponíveis com dados reais do engine (taxa, prazo, mínimo)
 e as posições abertas do portfólio para resgate.
 
 Callbacks:
-  on_invest(product_key: str, amount: float)  → comprar novo produto
-  on_redeem(position_index: int)              → resgatar posição existente
-  on_back()                                   → voltar
+  on_invest(product_key: str, amount: float, emergency_fund: bool)  → comprar novo produto
+  on_redeem(position_index: int)                                     → resgatar posição existente
+  on_back()                                                          → voltar
 """
 
 from __future__ import annotations
@@ -17,6 +17,77 @@ from __future__ import annotations
 from typing import Callable
 
 import customtkinter as ctk
+
+
+def _confirm_popup(
+    master,
+    title: str,
+    message: str,
+    on_yes: Callable,
+) -> None:
+    """
+    Exibe um popup modal de confirmação com botões Sim / Cancelar.
+    Chama `on_yes` apenas se o usuário confirmar.
+    """
+    dialog = ctk.CTkToplevel(master)
+    dialog.title(title)
+    dialog.resizable(False, False)
+    dialog.grab_set()          # modal
+    dialog.lift()
+    dialog.focus_force()
+
+    dialog.grid_columnconfigure(0, weight=1)
+
+    ctk.CTkLabel(
+        dialog,
+        text=message,
+        font=ctk.CTkFont(size=14),
+        wraplength=340,
+        justify="center",
+    ).grid(row=0, column=0, padx=32, pady=(28, 20))
+
+    btn_frame = ctk.CTkFrame(dialog, fg_color="transparent")
+    btn_frame.grid(row=1, column=0, padx=32, pady=(0, 24))
+    btn_frame.grid_columnconfigure((0, 1), weight=1)
+
+    def _yes():
+        dialog.destroy()
+        on_yes()
+
+    ctk.CTkButton(
+        btn_frame,
+        text="✅  Confirmar",
+        font=ctk.CTkFont(size=13, weight="bold"),
+        width=130, height=38,
+        corner_radius=8,
+        fg_color="#3b7a3a",
+        hover_color="#2f6030",
+        command=_yes,
+    ).grid(row=0, column=0, padx=(0, 8))
+
+    ctk.CTkButton(
+        btn_frame,
+        text="✖  Cancelar",
+        font=ctk.CTkFont(size=13),
+        width=130, height=38,
+        corner_radius=8,
+        fg_color="gray25",
+        hover_color="gray35",
+        command=dialog.destroy,
+    ).grid(row=0, column=1, padx=(8, 0))
+
+    # Centre the dialog over the master window
+    master.update_idletasks()
+    mw = master.winfo_width()
+    mh = master.winfo_height()
+    mx = master.winfo_rootx()
+    my = master.winfo_rooty()
+    dialog.update_idletasks()
+    dw = dialog.winfo_reqwidth()
+    dh = dialog.winfo_reqheight()
+    x = mx + (mw - dw) // 2
+    y = my + (mh - dh) // 2
+    dialog.geometry(f"+{x}+{y}")
 
 
 class LowRiskInvestmentsPage(ctk.CTkFrame):
@@ -28,7 +99,7 @@ class LowRiskInvestmentsPage(ctk.CTkFrame):
         products: list[dict] | None = None,
         open_positions: list[dict] | None = None,
         cash: float = 0.0,
-        on_invest: Callable[[str, float], None] | None = None,
+        on_invest: Callable[[str, float, bool], None] | None = None,
         on_redeem: Callable[[int], None] | None = None,
         on_back: Callable | None = None,
         **kwargs,
@@ -52,8 +123,9 @@ class LowRiskInvestmentsPage(ctk.CTkFrame):
                                months_held (int)
                                can_redeem (bool)
                                is_mature (bool)
+                               is_emergency_fund (bool)
             cash:            Saldo disponível em caixa.
-            on_invest:       Callback(product_key, amount).
+            on_invest:       Callback(product_key, amount, emergency_fund).
             on_redeem:       Callback(position_index).
             on_back:         Callback para voltar.
         """
@@ -61,11 +133,12 @@ class LowRiskInvestmentsPage(ctk.CTkFrame):
         self._products = products or []
         self._open_positions = open_positions or []
         self._cash = cash
-        self._on_invest = on_invest or (lambda key, amt: None)
+        self._on_invest = on_invest or (lambda key, amt, ef: None)
         self._on_redeem = on_redeem or (lambda idx: None)
         self._on_back = on_back or (lambda: None)
         self._selected_product_key: str | None = None
         self._error_text = ctk.StringVar(value="")
+        self._is_emergency_fund = ctk.BooleanVar(value=False)
         self._build()
 
     # ── Build ─────────────────────────────────────────────────────────────────
@@ -151,7 +224,7 @@ class LowRiskInvestmentsPage(ctk.CTkFrame):
                 scroll_prod, text="Nenhum produto disponível.", text_color="gray"
             ).grid(row=0, column=0, pady=12)
 
-        # ── Input + botão investir ────────────────────────────────────────────
+        # ── Input + botões investir / reserva de emergência ───────────────────
         input_frame = ctk.CTkFrame(_s, fg_color="transparent")
         input_frame.grid(row=3, column=0, padx=40, pady=(12, 0), sticky="ew")
         input_frame.grid_columnconfigure(1, weight=1)
@@ -176,14 +249,30 @@ class LowRiskInvestmentsPage(ctk.CTkFrame):
             font=ctk.CTkFont(size=12),
         ).grid(row=4, column=0, padx=40, pady=(6, 0))
 
+        # ── Action buttons row ────────────────────────────────────────────────
+        action_frame = ctk.CTkFrame(_s, fg_color="transparent")
+        action_frame.grid(row=5, column=0, padx=40, pady=(8, 0))
+
         ctk.CTkButton(
-            _s,
+            action_frame,
             text="Investir  →",
             font=ctk.CTkFont(size=15, weight="bold"),
             width=200, height=44,
             corner_radius=10,
             command=self._on_confirm,
-        ).grid(row=5, column=0, padx=40, pady=(8, 0))
+        ).grid(row=0, column=0, padx=(0, 12))
+
+        self._ef_btn = ctk.CTkButton(
+            action_frame,
+            text="🛡  Reserva de Emergência",
+            font=ctk.CTkFont(size=13),
+            width=220, height=44,
+            corner_radius=10,
+            fg_color="gray25",
+            hover_color="gray35",
+            command=self._toggle_emergency_fund,
+        )
+        self._ef_btn.grid(row=0, column=1)
 
         # ── Posições abertas ──────────────────────────────────────────────────
         if self._open_positions:
@@ -200,6 +289,7 @@ class LowRiskInvestmentsPage(ctk.CTkFrame):
 
             for pos in self._open_positions:
                 mature_tag = "  🔓 Disponível" if pos.get("can_redeem") else "  🔒 Em carência"
+                ef_tag = "  🛡 Emergência" if pos.get("is_emergency_fund") else ""
                 fg = "#3b5a2a" if pos.get("can_redeem") else "gray20"
                 hv = "#4a7a3a" if pos.get("can_redeem") else "gray20"
                 ctk.CTkButton(
@@ -209,7 +299,7 @@ class LowRiskInvestmentsPage(ctk.CTkFrame):
                         f"   |   R$ {pos['principal_with_earnings']:,.2f}"
                         f"  (+R$ {pos['gross_earnings']:,.2f})"
                         f"   |   {pos['months_held']} mês(es)"
-                        f"{mature_tag}"
+                        f"{mature_tag}{ef_tag}"
                     ),
                     font=ctk.CTkFont(size=12),
                     height=38,
@@ -218,12 +308,28 @@ class LowRiskInvestmentsPage(ctk.CTkFrame):
                     hover_color=hv,
                     anchor="w",
                     state="normal" if pos.get("can_redeem") else "disabled",
-                    command=lambda idx=pos["index"]: self._on_redeem(idx),
+                    command=lambda idx=pos["index"], lbl=pos["label"], val=pos["principal_with_earnings"]: self._ask_redeem(idx, lbl, val),
                 ).grid(row=pos["index"], column=0, pady=3, sticky="ew")
         else:
             ctk.CTkFrame(_s, height=24, fg_color="transparent").grid(row=6, column=0)
 
     # ── Helpers ───────────────────────────────────────────────────────────────
+
+    def _toggle_emergency_fund(self):
+        new_val = not self._is_emergency_fund.get()
+        self._is_emergency_fund.set(new_val)
+        if new_val:
+            self._ef_btn.configure(
+                fg_color="#7c5cd8",
+                hover_color="#6a4ec0",
+                text="🛡  Reserva de Emergência  ✔",
+            )
+        else:
+            self._ef_btn.configure(
+                fg_color="gray25",
+                hover_color="gray35",
+                text="🛡  Reserva de Emergência",
+            )
 
     def _select_product(self, key: str):
         self._selected_product_key = key
@@ -265,7 +371,27 @@ class LowRiskInvestmentsPage(ctk.CTkFrame):
             return
 
         self._error_text.set("")
-        self._on_invest(self._selected_product_key, amount)
+
+        ef = self._is_emergency_fund.get()
+        ef_note = "\n\n🛡  Marcado como Reserva de Emergência." if ef else ""
+        label = prod["label"] if prod else self._selected_product_key
+
+        _confirm_popup(
+            master=self,
+            title="Confirmar Investimento",
+            message=(
+                f"Investir R$ {amount:,.2f} em\n{label}?{ef_note}"
+            ),
+            on_yes=lambda: self._on_invest(self._selected_product_key, amount, ef),
+        )
+
+    def _ask_redeem(self, position_index: int, label: str, value: float):
+        _confirm_popup(
+            master=self,
+            title="Confirmar Resgate",
+            message=f"Resgatar posição [{position_index+1}] {label}\n(R$ {value:,.2f})?",
+            on_yes=lambda: self._on_redeem(position_index),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -292,9 +418,11 @@ if __name__ == "__main__":
     ]
     _demo_positions = [
         {"index": 0, "label": "Tesouro Selic", "principal_with_earnings": 2050.30,
-         "gross_earnings": 50.30, "months_held": 3, "can_redeem": True, "is_mature": False},
+         "gross_earnings": 50.30, "months_held": 3, "can_redeem": True, "is_mature": False,
+         "is_emergency_fund": True},
         {"index": 1, "label": "CDB 90 dias", "principal_with_earnings": 1025.10,
-         "gross_earnings": 25.10, "months_held": 2, "can_redeem": False, "is_mature": False},
+         "gross_earnings": 25.10, "months_held": 2, "can_redeem": False, "is_mature": False,
+         "is_emergency_fund": False},
     ]
 
     LowRiskInvestmentsPage(
@@ -302,7 +430,7 @@ if __name__ == "__main__":
         products=_demo_products,
         open_positions=_demo_positions,
         cash=3500.00,
-        on_invest=lambda key, amt: print(f"Investir R$ {amt:.2f} em '{key}'"),
+        on_invest=lambda key, amt, ef: print(f"Investir R$ {amt:.2f} em '{key}' | emergência={ef}"),
         on_redeem=lambda idx: print(f"Resgatar posição {idx}"),
         on_back=lambda: print("← Voltar"),
         fg_color="transparent",

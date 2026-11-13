@@ -172,6 +172,7 @@ def _save_portfolio(
             "locked_rate_annual": pos.locked_rate_annual,
             "gross_earnings":     round(pos.gross_earnings, 6),
             "cycles_held":        pos.cycles_held,
+            "is_emergency_fund":  pos.is_emergency_fund,
         })
 
     stocks = {}
@@ -234,6 +235,7 @@ def _load_portfolio(engine: "SimulatorEngine", profile: InvestorProfile) -> int:
             principal=fp["principal"],
             purchase_cycle=fp["purchase_cycle"],
             locked_rate_annual=fp.get("locked_rate_annual"),
+            is_emergency_fund=fp.get("is_emergency_fund", False),
         )
         pos.gross_earnings = fp.get("gross_earnings", 0.0)
         pos.cycles_held    = fp.get("cycles_held", 0)
@@ -514,7 +516,7 @@ class App(ctk.CTk):
                 for i, pos in enumerate(snap.get("fixed_positions", []))
             ]
 
-            def on_invest(label: str, amount: float):
+            def on_invest(label: str, amount: float, emergency_fund: bool = False):
                 p = self._current_portfolio()
                 if not self._engine or not p:
                     self._transition(AppState.SIMULATOR_MAIN)
@@ -527,7 +529,7 @@ class App(ctk.CTk):
                     self._transition(AppState.SIMULATOR_MAIN)
                     return
                 try:
-                    self._engine.buy_fixed(p, ft, amount)
+                    self._engine.buy_fixed(p, ft, amount, emergency_fund=emergency_fund)
                     if self._profile: _save_portfolio(self._engine, self._profile, self._deposit_done_for_cycle)
                 except ValueError as exc:
                     print(f"[LOW RISK] Erro ao investir: {exc}")

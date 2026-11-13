@@ -19,6 +19,76 @@ from typing import Callable
 import customtkinter as ctk
 
 
+def _confirm_popup(
+    master,
+    title: str,
+    message: str,
+    on_yes: Callable,
+) -> None:
+    """
+    Exibe um popup modal de confirmação com botões Confirmar / Cancelar.
+    Chama `on_yes` apenas se o usuário confirmar.
+    """
+    dialog = ctk.CTkToplevel(master)
+    dialog.title(title)
+    dialog.resizable(False, False)
+    dialog.grab_set()
+    dialog.lift()
+    dialog.focus_force()
+
+    dialog.grid_columnconfigure(0, weight=1)
+
+    ctk.CTkLabel(
+        dialog,
+        text=message,
+        font=ctk.CTkFont(size=14),
+        wraplength=340,
+        justify="center",
+    ).grid(row=0, column=0, padx=32, pady=(28, 20))
+
+    btn_frame = ctk.CTkFrame(dialog, fg_color="transparent")
+    btn_frame.grid(row=1, column=0, padx=32, pady=(0, 24))
+    btn_frame.grid_columnconfigure((0, 1), weight=1)
+
+    def _yes():
+        dialog.destroy()
+        on_yes()
+
+    ctk.CTkButton(
+        btn_frame,
+        text="✅  Confirmar",
+        font=ctk.CTkFont(size=13, weight="bold"),
+        width=130, height=38,
+        corner_radius=8,
+        fg_color="#3b7a3a",
+        hover_color="#2f6030",
+        command=_yes,
+    ).grid(row=0, column=0, padx=(0, 8))
+
+    ctk.CTkButton(
+        btn_frame,
+        text="✖  Cancelar",
+        font=ctk.CTkFont(size=13),
+        width=130, height=38,
+        corner_radius=8,
+        fg_color="gray25",
+        hover_color="gray35",
+        command=dialog.destroy,
+    ).grid(row=0, column=1, padx=(8, 0))
+
+    master.update_idletasks()
+    mw = master.winfo_width()
+    mh = master.winfo_height()
+    mx = master.winfo_rootx()
+    my = master.winfo_rooty()
+    dialog.update_idletasks()
+    dw = dialog.winfo_reqwidth()
+    dh = dialog.winfo_reqheight()
+    x = mx + (mw - dw) // 2
+    y = my + (mh - dh) // 2
+    dialog.geometry(f"+{x}+{y}")
+
+
 _TREND_COLOR = {
     "📈 Alta":      "#4caf50",
     "📉 Baixa":     "#e05c5c",
@@ -309,7 +379,13 @@ class HighRiskInvestmentsPage(ctk.CTkFrame):
                 )
                 return
             self._error_text.set("")
-            self._on_buy(self._selected_ticker, amount)
+            ticker = self._selected_ticker
+            _confirm_popup(
+                master=self,
+                title="Confirmar Compra",
+                message=f"Comprar R$ {amount:,.2f} de {ticker}?",
+                on_yes=lambda: self._on_buy(ticker, amount),
+            )
         else:
             # Verificar se tem cotas suficientes
             pos = next(
@@ -328,7 +404,13 @@ class HighRiskInvestmentsPage(ctk.CTkFrame):
                 )
                 return
             self._error_text.set("")
-            self._on_sell(self._selected_ticker, amount)
+            ticker = self._selected_ticker
+            _confirm_popup(
+                master=self,
+                title="Confirmar Venda",
+                message=f"Vender {amount} cotas de {ticker}?",
+                on_yes=lambda: self._on_sell(ticker, amount),
+            )
 
 
 # ---------------------------------------------------------------------------

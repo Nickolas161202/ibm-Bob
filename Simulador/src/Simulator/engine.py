@@ -114,8 +114,9 @@ class SimulatorEngine:
         portfolio: Portfolio,
         product_type: FixedIncomeType,
         amount: float,
+        emergency_fund: bool = False,
     ):
-        return portfolio.buy_fixed_income(product_type, amount, self.market.cycle)
+        return portfolio.buy_fixed_income(product_type, amount, self.market.cycle, emergency_fund=emergency_fund)
 
     def redeem_fixed(self, portfolio: Portfolio, position_index: int):
         return portfolio.redeem_fixed_income(position_index, self.market.cycle)

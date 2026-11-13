@@ -208,6 +208,7 @@ class Portfolio:
         product_type: FixedIncomeType,
         amount: float,
         cycle: int,
+        emergency_fund: bool = False,
     ) -> FixedIncomePosition:
         product = PRODUCTS[product_type]
         if amount < product.min_investment:
@@ -223,9 +224,10 @@ class Portfolio:
             principal=amount,
             purchase_cycle=cycle,
             locked_rate_annual=product.rate_param if product.indexer == "prefixed" else None,
+            is_emergency_fund=emergency_fund,
         )
         self.fixed_positions.append(pos)
-        self._log(cycle, "buy_fixed", amount, ticker=product.label)
+        self._log(cycle, "buy_fixed", amount, ticker=product.label, emergency_fund=emergency_fund)
         return pos
 
     def redeem_fixed_income(

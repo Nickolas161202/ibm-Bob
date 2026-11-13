@@ -197,6 +197,8 @@ class FixedIncomePosition:
     purchase_cycle: int       # ciclo em que foi comprado
     # Taxa prefixada registrada no momento da compra (para prefixed/ipca_plus)
     locked_rate_annual: Optional[float] = None
+    # marcado como reserva de emergência pelo usuário
+    is_emergency_fund: bool = False
 
     # acumulado de rendimento bruto
     gross_earnings: float = field(default=0.0, init=False)
@@ -259,4 +261,5 @@ class FixedIncomePosition:
             "ir_exempt": self.product.ir_exempt,
             "can_redeem": self.can_redeem(current_cycle),
             "is_mature": self.is_mature(current_cycle),
+            "is_emergency_fund": self.is_emergency_fund,
         }
