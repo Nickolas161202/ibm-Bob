@@ -608,6 +608,7 @@ class App(ctk.CTk):
                     ).strip(),
                     quest_objective="🎯  " + quest_data.get("objective", ""),
                     on_start=on_start,
+                    cycles_total=int(quest_data.get("cycles_total", 1)),
                     fg_color="transparent",
                 ))
 
@@ -781,10 +782,7 @@ class App(ctk.CTk):
                     "Mantenha sua reserva de emergência antes de buscar maior retorno.",
                 )
 
-                # ── All scores come exclusively from the AI result ─────────────
-                # score       → overall badge (🏆 / ⚡ / 💀)
-                # objective_score, allocation_score, risk_score → sub-score pills
-                # Using a single source of truth avoids contradictory values.
+                # All scores come exclusively from the AI result
                 quest_completed  = ai_result.get("score", 50)
                 quest_tip        = ai_result.get("quest_tip", "")
                 objective_score  = ai_result.get("objective_score")
@@ -798,11 +796,30 @@ class App(ctk.CTk):
                 goal_amount = goal_p_snap.get("goal_amount", 0.0)
                 goal_remaining_r = max(0.0, goal_amount - nw)
 
+                # ── Multi-cycle quest: determine if there are more cycles left ──
+                current_cycle = snap.get("cycle", 0)
+                start_cycle   = (self._quest_start_snapshot or {}).get("cycle", current_cycle)
+                cycles_played = max(1, current_cycle - start_cycle + 1)
+                cycles_total  = int(self._active_quest.get("cycles_total", 1))
+                quest_continues = cycles_played < cycles_total
+
                 def on_continue():
-                    self._maybe_confirm_profile_update(
-                        ai_result=ai_result,
-                        on_done=lambda: self._transition(AppState.END_MONTH),
-                    )
+                    # For the final cycle (or single-cycle quests), confirm profile
+                    # update then advance to END_MONTH normally.
+                    # For intermediate cycles, skip profile update and just advance.
+                    if quest_continues:
+                        self._transition(AppState.END_MONTH)
+                    else:
+                        self._maybe_confirm_profile_update(
+                            ai_result=ai_result,
+                            on_done=lambda: self._transition(AppState.END_MONTH),
+                        )
+
+                # ── Badge label: show cycle progress for multi-cycle quests ─────
+                if cycles_total > 1:
+                    cycle_label = f"Ciclo {cycles_played} de {cycles_total}"
+                else:
+                    cycle_label = None
 
                 self._replace_loading(DebriefingPage(
                     master=self,
@@ -823,6 +840,8 @@ class App(ctk.CTk):
                     allocation_score=allocation_score,
                     risk_score=risk_score,
                     quest_tip=quest_tip,
+                    quest_continues=quest_continues,
+                    quest_cycle_label=cycle_label,
                     fg_color="transparent",
                 ))
 
@@ -871,9 +890,33 @@ class App(ctk.CTk):
     # Quest helpers
     # ─────────────────────────────────────────────────────────────────────────
 
+    def _is_quest_multi_cycle_active(self) -> bool:
+        """
+        Returns True when there is an ongoing multi-cycle quest that still has
+        remaining cycles to play (i.e. the user should continue it rather than
+        generating a new one).
+        """
+        if not self._active_quest:
+            return False
+        cycles_total = int(self._active_quest.get("cycles_total", 1))
+        if cycles_total <= 1:
+            return False
+        # Compare current simulator cycle against the cycle when the quest started
+        current_cycle = self._engine.market.cycle if self._engine else 0
+        start_cycle   = self._quest_start_snapshot.get("cycle", current_cycle)
+        cycles_played = max(1, current_cycle - start_cycle + 1)
+        return cycles_played < cycles_total
+
     def _start_quest(self):
-        """Transition to the quest screen; generation runs in the background."""
-        self._transition(AppState.QUEST_GENERATED)
+        """
+        Transition to the quest screen.
+        If a multi-cycle quest is still running, go straight to SIMULATOR_MAIN
+        (skipping generation) so the user continues the same quest.
+        """
+        if self._is_quest_multi_cycle_active():
+            self._transition(AppState.SIMULATOR_MAIN)
+        else:
+            self._transition(AppState.QUEST_GENERATED)
 
     def _request_ai_debriefing(self, snap: dict, quest_completed: bool) -> str:
         """
@@ -1190,6 +1233,7 @@ class App(ctk.CTk):
             "defeat_condition":  "Não atingir a meta no prazo do ciclo.",
             "initial_tip": "Tesouro Selic e CDB de liquidez diária são ótimas opções para reserva.",
             "type": "acumulação",
+            "cycles_total": 1,
         }
 
         if not self._profile:
@@ -1292,6 +1336,31 @@ class App(ctk.CTk):
             "dominant_asset_class": dominant_asset_class,
         }
 
+        # ── Recent study topics (last 5 items studied, most recent first) ─────
+        lib = self._study_library
+        recent_study_topics: list[dict] = []
+        if lib:
+            all_contents = lib.get_all()
+            # Sort by created_cycle descending
+            sorted_contents = sorted(all_contents, key=lambda c: c.created_cycle, reverse=True)
+            recent_study_topics = [
+                {
+                    "topic":   c.topic,
+                    "mastered": c.mastered,
+                    "cycle":   c.created_cycle,
+                }
+                for c in sorted_contents[:5]
+            ]
+
+        # ── cycles_total_hint: based on inferred level ────────────────────────
+        _level_cycles: dict[str, list[int]] = {
+            "iniciante":     [1],
+            "intermediário": [1, 1, 2],   # mostly 1, occasionally 2
+            "avançado":      [2, 2, 3],   # mostly 2-3
+        }
+        _choices = _level_cycles.get(inferred_level, [1])
+        cycles_total_hint = random.choice(_choices)
+
         learning_ctx = {
             "last_score":           inf.last_score,
             "completed_quests":     inf.completed_quests,
@@ -1305,6 +1374,8 @@ class App(ctk.CTk):
             "current_net_worth":    current_net_worth,
             "goal_urgency":         goal_urgency,
             "recent_behavior":      recent_behavior,
+            "recent_study_topics":  recent_study_topics,
+            "cycles_total_hint":    cycles_total_hint,
         }
 
         # Quest type chosen randomly among the three types
@@ -1335,6 +1406,9 @@ class App(ctk.CTk):
             )
             data = json.loads(raw)
             data.setdefault("type", q_type)
+            # Clamp cycles_total to [1, 3] and store the quest start cycle
+            data["cycles_total"] = max(1, min(3, int(data.get("cycles_total", 1))))
+            data["quest_cycle_start"] = snap.get("cycle", 0)
             self._active_quest = data
             return data
         except Exception as e:
@@ -1355,7 +1429,7 @@ class App(ctk.CTk):
         if not self._profile or not portfolio:
             return {}
 
-        # ── Fix E: actions scoped to this quest only (quest-start index) ─────
+        # ── Actions scoped to this quest only (quest-start index) ────────────
         actions = portfolio.transaction_log[self._quest_start_log_len:]
 
         current_profile = {
@@ -1376,7 +1450,7 @@ class App(ctk.CTk):
             for e in self._inference_state.history
         ]
 
-        # ── Fix E: cycles_played derived from quest-start snapshot ────────────
+        # ── cycles_played derived from quest-start snapshot ───────────────────
         current_cycle = snap.get("cycle", 0)
         start_cycle   = (self._quest_start_snapshot or {}).get("cycle", current_cycle)
         cycles_played = max(1, current_cycle - start_cycle + 1)
@@ -1384,13 +1458,23 @@ class App(ctk.CTk):
         # Stamp cycles_played onto the quest dict so the prompt sees it
         quest_for_eval = {**self._active_quest, "cycles_played": cycles_played}
 
+        # ── Recent study topics for the AI ────────────────────────────────────
+        lib = self._study_library
+        recent_study_topics: list[dict] = []
+        if lib:
+            sorted_contents = sorted(lib.get_all(), key=lambda c: c.created_cycle, reverse=True)
+            recent_study_topics = [
+                {"topic": c.topic, "mastered": c.mastered, "cycle": c.created_cycle}
+                for c in sorted_contents[:5]
+            ]
+
         try:
             api_key = os.environ.get("BOB_API_KEY", "")
             bob = Bob(email="", password=api_key)
             bob.login()
             ai = AiEngine(bob)
 
-            # ── Fix B: prime Bob with the player's financial profile ──────────
+            # Prime Bob with the player's financial profile
             ai.initialize_session(
                 name=self._profile.name,
                 incomes=[{"source": "Renda mensal", "amount": self._profile.monthly_income}],
@@ -1398,12 +1482,12 @@ class App(ctk.CTk):
                 debts=[],
             )
 
-            # ── Fix C: send the market + portfolio context at quest start ─────
+            # Send the market + portfolio context at quest start
             if self._quest_start_snapshot and self._engine:
                 start_ctx = {**self._quest_start_snapshot, **self._engine.market_snapshot()}
                 ai.send_simulator_context(start_ctx)
 
-            # ── Fix D: remind Bob of the quest it generated ───────────────────
+            # Remind Bob of the quest it generated
             ai.send_quest_context(quest_for_eval, cycles_played=cycles_played)
 
             raw = ai.analyze_quest_performance(
@@ -1412,6 +1496,7 @@ class App(ctk.CTk):
                 portfolio_snapshot=snap,
                 current_profile=current_profile,
                 inference_history=history_dicts,
+                recent_study_topics=recent_study_topics,
             )
             data = json.loads(raw)
 

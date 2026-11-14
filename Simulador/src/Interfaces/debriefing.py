@@ -31,7 +31,6 @@ class DebriefingPage(ctk.CTkFrame):
         agent_feedback: str = "Bom trabalho! Continue investindo com disciplina.",
         quest_score: int = 0,
         on_continue: Callable | None = None,
-        # ── Sub-Task 4: new optional fields ──────────────────────────────────
         goal_name: str = "",
         goal_completion_pct: float = 0.0,
         goal_remaining_r: float = 0.0,
@@ -39,29 +38,32 @@ class DebriefingPage(ctk.CTkFrame):
         allocation_score: int | None = None,
         risk_score: int | None = None,
         quest_tip: str = "",
+        quest_continues: bool = False,
+        quest_cycle_label: str | None = None,
         **kwargs,
     ):
         """
         Args:
-            master:             Widget pai.
-            player_name:        Nome do jogador.
-            net_worth:          Patrimônio total atual (R$).
-            net_worth_change:   Variação absoluta no período (R$, pode ser negativa).
-            cash_pct:           % do portfólio em caixa.
-            fixed_pct:          % em renda fixa.
-            stocks_pct:         % em renda variável.
-            cycles_played:      Número de ciclos/meses jogados.
-            agent_feedback:     Mensagem textual do agente de IA.
-            quest_score:        Pontuação de conclusão da quest definida pelo Agente (1–100).
-                                > 75  → concluída, 25–75 → quase lá, < 25 → falhou.
-            on_continue:        Callback ao clicar em "Continuar".
-            goal_name:          Nome do objetivo financeiro do usuário.
-            goal_completion_pct:% de conclusão do objetivo (0–100).
-            goal_remaining_r:   R$ restantes para atingir o objetivo.
-            objective_score:    Sub-pontuação do cumprimento do objetivo (0–100).
-            allocation_score:   Sub-pontuação de qualidade de alocação (0–100).
-            risk_score:         Sub-pontuação de gestão de risco (0–100).
-            quest_tip:          Dica educativa de uma frase proveniente da IA.
+            master:              Widget pai.
+            player_name:         Nome do jogador.
+            net_worth:           Patrimônio total atual (R$).
+            net_worth_change:    Variação absoluta no período (R$, pode ser negativa).
+            cash_pct:            % do portfólio em caixa.
+            fixed_pct:           % em renda fixa.
+            stocks_pct:          % em renda variável.
+            cycles_played:       Número de ciclos/meses jogados.
+            agent_feedback:      Mensagem textual do agente de IA.
+            quest_score:         Pontuação de conclusão da quest definida pelo Agente (1–100).
+            on_continue:         Callback ao clicar em "Continuar".
+            goal_name:           Nome do objetivo financeiro do usuário.
+            goal_completion_pct: % de conclusão do objetivo (0–100).
+            goal_remaining_r:    R$ restantes para atingir o objetivo.
+            objective_score:     Sub-pontuação do cumprimento do objetivo (0–100).
+            allocation_score:    Sub-pontuação de qualidade de alocação (0–100).
+            risk_score:          Sub-pontuação de gestão de risco (0–100).
+            quest_tip:           Dica educativa de uma frase proveniente da IA.
+            quest_continues:     True se a quest multi-ciclo ainda tem ciclos restantes.
+            quest_cycle_label:   Ex: "Ciclo 1 de 3" para quests multi-ciclo.
         """
         super().__init__(master, **kwargs)
         self._player_name = player_name
@@ -81,6 +83,8 @@ class DebriefingPage(ctk.CTkFrame):
         self._allocation_score = allocation_score
         self._risk_score = risk_score
         self._quest_tip = quest_tip
+        self._quest_continues = quest_continues
+        self._quest_cycle_label = quest_cycle_label
         self._build()
 
     def _build(self):
@@ -96,7 +100,10 @@ class DebriefingPage(ctk.CTkFrame):
         _self = scroll
 
         # ── Row 0: Título ─────────────────────────────────────────────────────
-        if self._quest_score > 75:
+        if self._quest_continues:
+            quest_badge = "  ⏳ Missão em Andamento"
+            badge_color = "#3b82d4"
+        elif self._quest_score > 75:
             quest_badge = "  🏆 Quest Concluída!"
             badge_color = "#4caf50"
         elif self._quest_score >= 25:
@@ -114,9 +121,10 @@ class DebriefingPage(ctk.CTkFrame):
         ).grid(row=0, column=0, padx=40, pady=(44, 4))
 
         # ── Row 1: Subtítulo ──────────────────────────────────────────────────
+        cycle_suffix = f"  ·  {self._quest_cycle_label}" if self._quest_cycle_label else ""
         ctk.CTkLabel(
             _self,
-            text=f"{self._player_name}  ·  {self._cycles_played} mês(es) jogado(s)",
+            text=f"{self._player_name}  ·  {self._cycles_played} mês(es) jogado(s){cycle_suffix}",
             font=ctk.CTkFont(size=13),
             text_color="gray",
         ).grid(row=1, column=0, padx=40, pady=(0, 12))
@@ -269,9 +277,10 @@ class DebriefingPage(ctk.CTkFrame):
         ).grid(row=2, column=0, padx=20, pady=(0, 16), sticky="w")
 
         # ── Row 7: Botão continuar ────────────────────────────────────────────
+        btn_text = "Próximo Mês  →" if self._quest_continues else "Continuar  →"
         ctk.CTkButton(
             _self,
-            text="Continuar  →",
+            text=btn_text,
             font=ctk.CTkFont(size=15, weight="bold"),
             width=200,
             height=44,
