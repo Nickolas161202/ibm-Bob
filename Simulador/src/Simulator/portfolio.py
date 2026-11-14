@@ -148,6 +148,7 @@ class InvestorProfile:
     goal: str                    # descrição textual do objetivo
     goal_amount: float           # R$ meta financeira
     goal_deadline_months: int    # prazo em meses para atingir o objetivo
+    password_hash: str = ""      # bcrypt hash da senha (vazio = sem senha definida)
 
     @property
     def monthly_surplus(self) -> float:
