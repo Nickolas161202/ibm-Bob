@@ -24,6 +24,7 @@ class QuestGeneratedPage(ctk.CTkFrame):
         quest_description: str = "Descrição da quest...",
         quest_objective: str = "Objetivo: —",
         on_start: Callable | None = None,
+        cycles_total: int = 1,
         **kwargs,
     ):
         """
@@ -33,12 +34,14 @@ class QuestGeneratedPage(ctk.CTkFrame):
             quest_description: Texto narrativo da quest.
             quest_objective:   Meta/objetivo mensurável.
             on_start:          Callback ao clicar em "Iniciar Quest".
+            cycles_total:      Duração total da quest em ciclos (1–3).
         """
         super().__init__(master, **kwargs)
         self._quest_title = quest_title
         self._quest_description = quest_description
         self._quest_objective = quest_objective
         self._on_start = on_start or (lambda: None)
+        self._cycles_total = cycles_total
         self._build()
 
     def _build(self):
@@ -47,9 +50,12 @@ class QuestGeneratedPage(ctk.CTkFrame):
         self.grid_rowconfigure(4, weight=1)   # espaço elástico inferior
 
         # ── Cabeçalho ────────────────────────────────────────────────────────
+        duration_badge = (
+            f"  ·  {self._cycles_total} ciclo(s)" if self._cycles_total > 1 else ""
+        )
         ctk.CTkLabel(
             self,
-            text="⚔️  Nova Quest",
+            text=f"⚔️  Nova Quest{duration_badge}",
             font=ctk.CTkFont(size=14),
             text_color="gray",
         ).grid(row=1, column=0, padx=40, pady=(0, 4))

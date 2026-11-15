@@ -56,6 +56,8 @@ from enum import Enum, auto
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from src.Simulator.auth import hash_password, verify_password
+
 import customtkinter as ctk
 
 # ── path setup ───────────────────────────────────────────────────────────────
@@ -85,6 +87,8 @@ from src.Interfaces.hub import HubPage
 from src.Interfaces.studyPage import StudyPage
 from src.Interfaces.editIncome import EditIncomePage
 from src.Interfaces.profileConfirm import ProfileConfirmDialog
+from src.Interfaces.loginPage import LoginPage as LoginPageUI
+from src.Interfaces.setPasswordDialog import SetPasswordDialog
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent / ".env")
 from src.Interfaces.loading import LoadingPage
@@ -96,6 +100,7 @@ from src.Interfaces.loading import LoadingPage
 
 class AppState(Enum):
     INICIAL              = auto()   # i2zG1y6y6l51
+    LOGIN                = auto()   # tela de seleção/login de perfil
     CREATE_PROFILE       = auto()   # u2zG367~7dvM
     HUB                  = auto()   # menu principal pós-onboarding
     EDIT_PROFILE         = auto()   # edição de nome/renda/gastos
@@ -109,30 +114,105 @@ class AppState(Enum):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Profile persistence
+# Profile persistence  (multi-profile layout)
+#
+# Layout on disk:
+#   data/profiles/
+#     <user_id>/
+#       profile.json    ← InvestorProfile (includes password_hash)
+#       portfolio.json  ← Portfolio state
+#
+# Legacy single-profile files (profile.json / portfolio.json at root of
+# data/profiles/) are migrated automatically on first load.
 # ─────────────────────────────────────────────────────────────────────────────
 
-_PROFILES_DIR = Path(__file__).parent / "data" / "profiles"
-_PROFILE_FILE  = _PROFILES_DIR / "profile.json"
-_PORTFOLIO_FILE = _PROFILES_DIR / "portfolio.json"
+_PROFILES_DIR        = Path(__file__).parent / "data" / "profiles"
+_LEGACY_PROFILE_FILE = _PROFILES_DIR / "profile.json"
+_LEGACY_PORTFOLIO_FILE = _PROFILES_DIR / "portfolio.json"
+
+
+def _profile_dir(user_id: str) -> Path:
+    return _PROFILES_DIR / user_id
+
+
+def _profile_file(user_id: str) -> Path:
+    return _profile_dir(user_id) / "profile.json"
+
+
+def _portfolio_file(user_id: str) -> Path:
+    return _profile_dir(user_id) / "portfolio.json"
+
+
+def _migrate_legacy_profile() -> None:
+    """
+    Move the old single-profile files into the new per-user-id folder layout,
+    so existing saves are not lost on first upgrade.
+    """
+    if not _LEGACY_PROFILE_FILE.exists():
+        return
+    try:
+        data = json.loads(_LEGACY_PROFILE_FILE.read_text(encoding="utf-8"))
+        uid = data.get("user_id")
+        if not uid:
+            return
+        dest_dir = _profile_dir(uid)
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        # Only migrate if the new location doesn't already exist
+        if not _profile_file(uid).exists():
+            # Ensure password_hash field present (old saves won't have it)
+            data.setdefault("password_hash", "")
+            _profile_file(uid).write_text(
+                json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
+            )
+        if _LEGACY_PORTFOLIO_FILE.exists() and not _portfolio_file(uid).exists():
+            import shutil
+            shutil.copy2(_LEGACY_PORTFOLIO_FILE, _portfolio_file(uid))
+        # Remove legacy files after successful migration
+        _LEGACY_PROFILE_FILE.unlink(missing_ok=True)
+        _LEGACY_PORTFOLIO_FILE.unlink(missing_ok=True)
+    except Exception as exc:
+        print(f"[migrate] Aviso: falha ao migrar perfil legado: {exc}")
 
 
 def _save_profile(profile: InvestorProfile) -> Path:
-    """Serialise *profile* to ``data/profiles/profile.json``, overwriting any previous one."""
-    _PROFILES_DIR.mkdir(parents=True, exist_ok=True)
-    # Remove any old per-user-id files left from a previous layout
-    for old in _PROFILES_DIR.glob("*.json"):
-        if old not in (_PROFILE_FILE, _PORTFOLIO_FILE):
-            old.unlink(missing_ok=True)
-    _PROFILE_FILE.write_text(json.dumps(asdict(profile), indent=2, ensure_ascii=False), encoding="utf-8")
-    return _PROFILE_FILE
+    """Serialise *profile* to its per-user-id folder."""
+    dest = _profile_dir(profile.user_id)
+    dest.mkdir(parents=True, exist_ok=True)
+    _profile_file(profile.user_id).write_text(
+        json.dumps(asdict(profile), indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    return _profile_file(profile.user_id)
 
 
-def _load_latest_profile() -> Optional[InvestorProfile]:
-    """Return the single saved InvestorProfile, or None if it does not exist."""
-    if not _PROFILE_FILE.exists():
+def _load_all_profiles() -> list[InvestorProfile]:
+    """Return all saved InvestorProfiles sorted by name."""
+    _migrate_legacy_profile()
+    profiles = []
+    if not _PROFILES_DIR.exists():
+        return profiles
+    for uid_dir in _PROFILES_DIR.iterdir():
+        if not uid_dir.is_dir():
+            continue
+        pf = uid_dir / "profile.json"
+        if not pf.exists():
+            continue
+        try:
+            data = json.loads(pf.read_text(encoding="utf-8"))
+            data.setdefault("password_hash", "")
+            profiles.append(InvestorProfile(**data))
+        except Exception as exc:
+            print(f"[load] Aviso: falha ao carregar perfil em {uid_dir}: {exc}")
+    profiles.sort(key=lambda p: p.name.lower())
+    return profiles
+
+
+def _load_profile(user_id: str) -> Optional[InvestorProfile]:
+    """Load a single profile by user_id."""
+    pf = _profile_file(user_id)
+    if not pf.exists():
         return None
-    data = json.loads(_PROFILE_FILE.read_text(encoding="utf-8"))
+    data = json.loads(pf.read_text(encoding="utf-8"))
+    data.setdefault("password_hash", "")
     return InvestorProfile(**data)
 
 
@@ -146,7 +226,7 @@ def _save_portfolio(
     deposit_done_cycle: int = -1,
 ) -> None:
     """
-    Serialise the portfolio's mutable state to ``data/profiles/portfolio.json``.
+    Serialise the portfolio's mutable state to its per-user-id folder.
 
     Saves:
       - cash
@@ -195,25 +275,29 @@ def _save_portfolio(
         "deposit_done_cycle": deposit_done_cycle,
     }
 
-    _PROFILES_DIR.mkdir(parents=True, exist_ok=True)
-    _PORTFOLIO_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    dest_dir = _profile_dir(profile.user_id)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    _portfolio_file(profile.user_id).write_text(
+        json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
 
 
 def _load_portfolio(engine: "SimulatorEngine", profile: InvestorProfile) -> int:
     """
-    Restore the portfolio from ``data/profiles/portfolio.json`` into *engine*.
+    Restore the portfolio from its per-user-id folder into *engine*.
     Returns the saved ``deposit_done_cycle`` value (default -1).
 
     Must be called AFTER engine.create_portfolio() so the Portfolio object
     already exists in engine.portfolios.
     """
-    if not _PORTFOLIO_FILE.exists():
+    pf = _portfolio_file(profile.user_id)
+    if not pf.exists():
         return -1
 
     from src.Simulator.fixed_income import FixedIncomeType, PRODUCTS, FixedIncomePosition
     from src.Simulator.variable_income import StockPosition
 
-    data = json.loads(_PORTFOLIO_FILE.read_text(encoding="utf-8"))
+    data = json.loads(pf.read_text(encoding="utf-8"))
     portfolio = engine.portfolios.get(profile.user_id)
     if portfolio is None:
         return -1
@@ -280,7 +364,7 @@ class App(ctk.CTk):
 
         # ── simulator state ───────────────────────────────────────────────────
         self._engine: Optional[SimulatorEngine] = None
-        self._profile: Optional[InvestorProfile] = _load_latest_profile()
+        self._profile: Optional[InvestorProfile] = None
         self._last_cycle_result = None   # CycleResult from advance_cycle()
         # tracks whether the monthly deposit was already done for the current cycle
         self._deposit_done_for_cycle: int = -1
@@ -289,12 +373,6 @@ class App(ctk.CTk):
         self._study_library: Optional[StudyLibrary] = None
         # tracks quest scores for mastery evaluation
         self._quest_scores: list[int] = []
-
-        if self._profile is not None:
-            self._engine = SimulatorEngine()
-            self._engine.create_portfolio(self._profile, initial_cash=self._profile.monthly_surplus)
-            # Restore saved portfolio state (overwrites the initial_cash if a save exists)
-            self._deposit_done_for_cycle = _load_portfolio(self._engine, self._profile)
 
         # ── profile inference state ───────────────────────────────────────────
         self._inference_state: ProfileInferenceState = ProfileInferenceState()
@@ -308,8 +386,8 @@ class App(ctk.CTk):
         # ── current frame reference (for clean destroy) ───────────────────────
         self._current_frame: Optional[ctk.CTkFrame] = None
 
-        # ── start ─────────────────────────────────────────────────────────────
-        self._transition(AppState.INICIAL)
+        # ── start — always go to login screen ────────────────────────────────
+        self._transition(AppState.LOGIN)
 
     # ─────────────────────────────────────────────────────────────────────────
     # Core transition method
@@ -328,32 +406,69 @@ class App(ctk.CTk):
     def _build_state(self, state: AppState) -> ctk.CTkFrame:
         """Factory — returns the CTkFrame for the given state."""
 
-        # ── INICIAL ───────────────────────────────────────────────────────────
-        if state == AppState.INICIAL:
-            def on_next():
-                if self._profile is not None:
-                    # Already has a profile → go to hub
-                    self._transition(AppState.HUB)
-                else:
-                    # No profile yet → create one
-                    self._transition(AppState.CREATE_PROFILE)
+        # ── LOGIN ─────────────────────────────────────────────────────────────
+        if state in (AppState.LOGIN, AppState.INICIAL):
+            profiles_data = [
+                {
+                    "user_id":      p.user_id,
+                    "name":         p.name,
+                    "goal":         p.goal,
+                    "has_password": bool(p.password_hash),
+                }
+                for p in _load_all_profiles()
+            ]
 
-            return InitialPage(
+            def on_select(user_id: str, password: str):
+                loaded = _load_profile(user_id)
+                if loaded is None:
+                    return
+                # Senha incorreta?
+                if loaded.password_hash and not verify_password(password, loaded.password_hash):
+                    # Exibe a mensagem de erro na tela existente, sem recriar
+                    if isinstance(self._current_frame, LoginPageUI):
+                        self._current_frame.show_error("❌  Senha incorreta. Tente novamente.")
+                    return
+                # Login bem-sucedido
+                self._profile = loaded
+                self._engine = SimulatorEngine()
+                self._engine.create_portfolio(loaded, initial_cash=loaded.monthly_surplus)
+                self._deposit_done_for_cycle = _load_portfolio(self._engine, loaded)
+                self._study_library = None
+                self._quest_scores = []
+                self._inference_state = ProfileInferenceState()
+                self._active_quest = {}
+                self._quest_start_snapshot = {}
+                self._quest_start_log_len = 0
+                self._transition(AppState.HUB)
+
+            return LoginPageUI(
                 master=self,
-                on_next=on_next,
+                profiles=profiles_data,
+                on_select=on_select,
+                on_create_new=lambda: self._transition(AppState.CREATE_PROFILE),
                 fg_color="transparent",
             )
 
         # ── CREATE_PROFILE ────────────────────────────────────────────────────
         if state == AppState.CREATE_PROFILE:
             def on_submit(profile: InvestorProfile):
-                self._profile = profile
-                self._engine = SimulatorEngine()
-                self._engine.create_portfolio(profile, initial_cash=profile.monthly_surplus)
-                self._salary_deposited = True   # initial cash counts as first deposit
-                _save_profile(profile)
-                _save_portfolio(self._engine, profile, self._deposit_done_for_cycle)
-                self._transition(AppState.HUB)
+                # Abre o diálogo de senha antes de salvar
+                def on_password(password: str):
+                    if password:
+                        profile.password_hash = hash_password(password)
+                    self._profile = profile
+                    self._engine = SimulatorEngine()
+                    self._engine.create_portfolio(profile, initial_cash=profile.monthly_surplus)
+                    self._salary_deposited = True   # initial cash counts as first deposit
+                    _save_profile(profile)
+                    _save_portfolio(self._engine, profile, self._deposit_done_for_cycle)
+                    self._transition(AppState.HUB)
+
+                SetPasswordDialog(
+                    master=self,
+                    profile_name=profile.name,
+                    on_confirm=on_password,
+                )
 
             return CreateProfilePage(
                 master=self,
@@ -366,6 +481,18 @@ class App(ctk.CTk):
             portfolio = self._current_portfolio()
             snap = self._engine.snapshot(portfolio) if self._engine and portfolio else {}
 
+            def on_switch_profile():
+                self._profile = None
+                self._engine = None
+                self._study_library = None
+                self._quest_scores = []
+                self._inference_state = ProfileInferenceState()
+                self._active_quest = {}
+                self._quest_start_snapshot = {}
+                self._quest_start_log_len = 0
+                self._deposit_done_for_cycle = -1
+                self._transition(AppState.LOGIN)
+
             return HubPage(
                 master=self,
                 player_name=self._profile.name if self._profile else "Aventureiro",
@@ -374,6 +501,7 @@ class App(ctk.CTk):
                 on_missions=lambda: self._start_quest(),
                 on_study=lambda: self._transition(AppState.STUDY),
                 on_reconfigure=lambda: self._transition(AppState.EDIT_PROFILE),
+                on_switch_profile=on_switch_profile,
                 fg_color="transparent",
             )
 
@@ -480,6 +608,7 @@ class App(ctk.CTk):
                     ).strip(),
                     quest_objective="🎯  " + quest_data.get("objective", ""),
                     on_start=on_start,
+                    cycles_total=int(quest_data.get("cycles_total", 1)),
                     fg_color="transparent",
                 ))
 
@@ -653,10 +782,7 @@ class App(ctk.CTk):
                     "Mantenha sua reserva de emergência antes de buscar maior retorno.",
                 )
 
-                # ── All scores come exclusively from the AI result ─────────────
-                # score       → overall badge (🏆 / ⚡ / 💀)
-                # objective_score, allocation_score, risk_score → sub-score pills
-                # Using a single source of truth avoids contradictory values.
+                # All scores come exclusively from the AI result
                 quest_completed  = ai_result.get("score", 50)
                 quest_tip        = ai_result.get("quest_tip", "")
                 objective_score  = ai_result.get("objective_score")
@@ -670,11 +796,30 @@ class App(ctk.CTk):
                 goal_amount = goal_p_snap.get("goal_amount", 0.0)
                 goal_remaining_r = max(0.0, goal_amount - nw)
 
+                # ── Multi-cycle quest: determine if there are more cycles left ──
+                current_cycle = snap.get("cycle", 0)
+                start_cycle   = (self._quest_start_snapshot or {}).get("cycle", current_cycle)
+                cycles_played = max(1, current_cycle - start_cycle + 1)
+                cycles_total  = int(self._active_quest.get("cycles_total", 1))
+                quest_continues = cycles_played < cycles_total
+
                 def on_continue():
-                    self._maybe_confirm_profile_update(
-                        ai_result=ai_result,
-                        on_done=lambda: self._transition(AppState.END_MONTH),
-                    )
+                    # For the final cycle (or single-cycle quests), confirm profile
+                    # update then advance to END_MONTH normally.
+                    # For intermediate cycles, skip profile update and just advance.
+                    if quest_continues:
+                        self._transition(AppState.END_MONTH)
+                    else:
+                        self._maybe_confirm_profile_update(
+                            ai_result=ai_result,
+                            on_done=lambda: self._transition(AppState.END_MONTH),
+                        )
+
+                # ── Badge label: show cycle progress for multi-cycle quests ─────
+                if cycles_total > 1:
+                    cycle_label = f"Ciclo {cycles_played} de {cycles_total}"
+                else:
+                    cycle_label = None
 
                 self._replace_loading(DebriefingPage(
                     master=self,
@@ -695,6 +840,8 @@ class App(ctk.CTk):
                     allocation_score=allocation_score,
                     risk_score=risk_score,
                     quest_tip=quest_tip,
+                    quest_continues=quest_continues,
+                    quest_cycle_label=cycle_label,
                     fg_color="transparent",
                 ))
 
@@ -743,9 +890,33 @@ class App(ctk.CTk):
     # Quest helpers
     # ─────────────────────────────────────────────────────────────────────────
 
+    def _is_quest_multi_cycle_active(self) -> bool:
+        """
+        Returns True when there is an ongoing multi-cycle quest that still has
+        remaining cycles to play (i.e. the user should continue it rather than
+        generating a new one).
+        """
+        if not self._active_quest:
+            return False
+        cycles_total = int(self._active_quest.get("cycles_total", 1))
+        if cycles_total <= 1:
+            return False
+        # Compare current simulator cycle against the cycle when the quest started
+        current_cycle = self._engine.market.cycle if self._engine else 0
+        start_cycle   = self._quest_start_snapshot.get("cycle", current_cycle)
+        cycles_played = max(1, current_cycle - start_cycle + 1)
+        return cycles_played < cycles_total
+
     def _start_quest(self):
-        """Transition to the quest screen; generation runs in the background."""
-        self._transition(AppState.QUEST_GENERATED)
+        """
+        Transition to the quest screen.
+        If a multi-cycle quest is still running, go straight to SIMULATOR_MAIN
+        (skipping generation) so the user continues the same quest.
+        """
+        if self._is_quest_multi_cycle_active():
+            self._transition(AppState.SIMULATOR_MAIN)
+        else:
+            self._transition(AppState.QUEST_GENERATED)
 
     def _request_ai_debriefing(self, snap: dict, quest_completed: bool) -> str:
         """
@@ -1651,6 +1822,7 @@ class App(ctk.CTk):
             "defeat_condition":  "Não atingir a meta no prazo do ciclo.",
             "initial_tip": "Tesouro Selic e CDB de liquidez diária são ótimas opções para reserva.",
             "type": "acumulação",
+            "cycles_total": 1,
         }
 
         if not self._profile:
@@ -1753,6 +1925,31 @@ class App(ctk.CTk):
             "dominant_asset_class": dominant_asset_class,
         }
 
+        # ── Recent study topics (last 5 items studied, most recent first) ─────
+        lib = self._study_library
+        recent_study_topics: list[dict] = []
+        if lib:
+            all_contents = lib.get_all()
+            # Sort by created_cycle descending
+            sorted_contents = sorted(all_contents, key=lambda c: c.created_cycle, reverse=True)
+            recent_study_topics = [
+                {
+                    "topic":   c.topic,
+                    "mastered": c.mastered,
+                    "cycle":   c.created_cycle,
+                }
+                for c in sorted_contents[:5]
+            ]
+
+        # ── cycles_total_hint: based on inferred level ────────────────────────
+        _level_cycles: dict[str, list[int]] = {
+            "iniciante":     [1],
+            "intermediário": [1, 1, 2],   # mostly 1, occasionally 2
+            "avançado":      [2, 2, 3],   # mostly 2-3
+        }
+        _choices = _level_cycles.get(inferred_level, [1])
+        cycles_total_hint = random.choice(_choices)
+
         learning_ctx = {
             "last_score":           inf.last_score,
             "completed_quests":     inf.completed_quests,
@@ -1766,6 +1963,8 @@ class App(ctk.CTk):
             "current_net_worth":    current_net_worth,
             "goal_urgency":         goal_urgency,
             "recent_behavior":      recent_behavior,
+            "recent_study_topics":  recent_study_topics,
+            "cycles_total_hint":    cycles_total_hint,
         }
 
         # Quest type chosen randomly among the three types
@@ -1796,6 +1995,9 @@ class App(ctk.CTk):
             )
             data = json.loads(raw)
             data.setdefault("type", q_type)
+            # Clamp cycles_total to [1, 3] and store the quest start cycle
+            data["cycles_total"] = max(1, min(3, int(data.get("cycles_total", 1))))
+            data["quest_cycle_start"] = snap.get("cycle", 0)
             self._active_quest = data
             return data
         except Exception as e:
@@ -1816,7 +2018,7 @@ class App(ctk.CTk):
         if not self._profile or not portfolio:
             return {}
 
-        # ── Fix E: actions scoped to this quest only (quest-start index) ─────
+        # ── Actions scoped to this quest only (quest-start index) ────────────
         actions = portfolio.transaction_log[self._quest_start_log_len:]
 
         current_profile = {
@@ -1837,7 +2039,7 @@ class App(ctk.CTk):
             for e in self._inference_state.history
         ]
 
-        # ── Fix E: cycles_played derived from quest-start snapshot ────────────
+        # ── cycles_played derived from quest-start snapshot ───────────────────
         current_cycle = snap.get("cycle", 0)
         start_cycle   = (self._quest_start_snapshot or {}).get("cycle", current_cycle)
         cycles_played = max(1, current_cycle - start_cycle + 1)
@@ -1845,13 +2047,23 @@ class App(ctk.CTk):
         # Stamp cycles_played onto the quest dict so the prompt sees it
         quest_for_eval = {**self._active_quest, "cycles_played": cycles_played}
 
+        # ── Recent study topics for the AI ────────────────────────────────────
+        lib = self._study_library
+        recent_study_topics: list[dict] = []
+        if lib:
+            sorted_contents = sorted(lib.get_all(), key=lambda c: c.created_cycle, reverse=True)
+            recent_study_topics = [
+                {"topic": c.topic, "mastered": c.mastered, "cycle": c.created_cycle}
+                for c in sorted_contents[:5]
+            ]
+
         try:
             api_key = os.environ.get("BOB_API_KEY", "")
             bob = Bob(email="", password=api_key)
             bob.login()
             ai = AiEngine(bob)
 
-            # ── Fix B: prime Bob with the player's financial profile ──────────
+            # Prime Bob with the player's financial profile
             ai.initialize_session(
                 name=self._profile.name,
                 incomes=[{"source": "Renda mensal", "amount": self._profile.monthly_income}],
@@ -1859,12 +2071,12 @@ class App(ctk.CTk):
                 debts=[],
             )
 
-            # ── Fix C: send the market + portfolio context at quest start ─────
+            # Send the market + portfolio context at quest start
             if self._quest_start_snapshot and self._engine:
                 start_ctx = {**self._quest_start_snapshot, **self._engine.market_snapshot()}
                 ai.send_simulator_context(start_ctx)
 
-            # ── Fix D: remind Bob of the quest it generated ───────────────────
+            # Remind Bob of the quest it generated
             ai.send_quest_context(quest_for_eval, cycles_played=cycles_played)
 
             raw = ai.analyze_quest_performance(
@@ -1873,6 +2085,7 @@ class App(ctk.CTk):
                 portfolio_snapshot=snap,
                 current_profile=current_profile,
                 inference_history=history_dicts,
+                recent_study_topics=recent_study_topics,
             )
             data = json.loads(raw)
 

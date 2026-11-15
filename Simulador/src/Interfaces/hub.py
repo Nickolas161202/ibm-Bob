@@ -29,17 +29,19 @@ class HubPage(ctk.CTkFrame):
         on_missions: Callable | None = None,
         on_study: Callable | None = None,
         on_reconfigure: Callable | None = None,
+        on_switch_profile: Callable | None = None,
         **kwargs,
     ):
         """
         Args:
-            master:          Widget pai.
-            player_name:     Nome do jogador, exibido no cabeçalho.
-            cycle:           Ciclo atual (0 = início da jornada).
-            net_worth:       Patrimônio atual (R$), exibido como resumo.
-            on_missions:     Callback ao escolher "Realizar Missões".
-            on_study:        Callback ao escolher "Material de Estudo".
-            on_reconfigure:  Callback ao escolher "Editar Perfil".
+            master:             Widget pai.
+            player_name:        Nome do jogador, exibido no cabeçalho.
+            cycle:              Ciclo atual (0 = início da jornada).
+            net_worth:          Patrimônio atual (R$), exibido como resumo.
+            on_missions:        Callback ao escolher "Realizar Missões".
+            on_study:           Callback ao escolher "Material de Estudo".
+            on_reconfigure:     Callback ao escolher "Editar Perfil".
+            on_switch_profile:  Callback ao clicar "Trocar Perfil" (volta ao login).
         """
         super().__init__(master, **kwargs)
         self._player_name = player_name
@@ -48,6 +50,7 @@ class HubPage(ctk.CTkFrame):
         self._on_missions = on_missions or (lambda: None)
         self._on_study = on_study or (lambda: None)
         self._on_reconfigure = on_reconfigure or (lambda: None)
+        self._on_switch_profile = on_switch_profile or (lambda: None)
         self._build()
 
     # -------------------------------------------------------------------------
@@ -57,7 +60,7 @@ class HubPage(ctk.CTkFrame):
     def _build(self):
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)   # espaço elástico superior
-        self.grid_rowconfigure(6, weight=1)   # espaço elástico inferior
+        self.grid_rowconfigure(7, weight=1)   # espaço elástico inferior
 
         # ── Saudação ──────────────────────────────────────────────────────────
         ctk.CTkLabel(
@@ -136,6 +139,22 @@ class HubPage(ctk.CTkFrame):
             command=self._on_reconfigure,
             accent=False,
         )
+
+        # ── Botão "Trocar Perfil" (discreto, abaixo dos botões principais) ────
+        ctk.CTkButton(
+            self,
+            text="↩  Trocar Perfil",
+            font=ctk.CTkFont(size=12),
+            width=160,
+            height=32,
+            corner_radius=8,
+            fg_color="transparent",
+            border_width=1,
+            border_color="gray40",
+            hover_color=("gray20", "gray17"),
+            text_color="gray",
+            command=self._on_switch_profile,
+        ).grid(row=6, column=0, pady=(12, 0))
 
     # -------------------------------------------------------------------------
     # Helper — botão de menu com ícone, título e subtítulo

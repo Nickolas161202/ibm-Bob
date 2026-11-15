@@ -578,56 +578,52 @@ class Engine:
         portfolio_snapshot: dict,
         current_profile: dict,
         inference_history: list[dict],
+        recent_study_topics: list[dict] | None = None,
     ) -> str:
         """
         Evaluates the user's quest performance and infers whether their
         behavioural profile (risk tolerance, knowledge level) should be updated.
 
-        Must be called after the quest cycle closes, with the full list of
-        actions taken and the final portfolio snapshot.
-
         Parameters
         ----------
-        quest              : the active quest dict, e.g.:
-                             {
-                               "type": str,          # "acumulação"|"sobrevivência"|"evento"
-                               "title": str,
-                               "objective": str,
-                               "victory_condition": str,
-                               "defeat_condition": str,
-                               "objective_achieved": float,   # kept for context; AI determines objective_score
-                               "cycles_played": int,
-                             }
-        actions            : list of Portfolio.transaction_log dicts for this quest
+        quest              : active quest dict — includes type, title, objective,
+                             victory_condition, defeat_condition, cycles_played,
+                             cycles_total (new: total planned duration)
+        actions            : Portfolio.transaction_log entries for this quest
         portfolio_snapshot : output of SimulatorEngine.snapshot()
-        current_profile    : {
-                               "risk_profile": str,
-                               "knowledge_level": str,
-                               "goal": str,
-                               "monthly_surplus": float,
-                             }
-        inference_history  : list of past ProfileInferenceEntry dicts (most recent last),
-                             used to give the agent continuity across quests
-
-        Returns the raw text response from Bob. Expected to be valid JSON:
-
-        {
-          "score": int,                  // 0–100
-          "main_weakness": str,          // e.g. "diversificação", "liquidez"
-          "inferred_risk": str,          // "conservador"|"moderado"|"arrojado"
-          "inferred_level": str,         // "iniciante"|"intermediário"|"avançado"
-          "reasoning": str,              // 2-3 sentences justifying the inference
-          "summary": str,                // short feedback shown to user on debriefing
-          "quest_tip": str               // one educational tip for next quest
-        }
+        current_profile    : { risk_profile, knowledge_level, goal, monthly_surplus }
+        inference_history  : past ProfileInferenceEntry dicts (most recent last)
+        recent_study_topics: list[dict] — [{topic, mastered, cycle}] from StudyLibrary
         """
         # ── Quest context ────────────────────────────────────────────────────
-        q_type      = quest.get("type", "acumulação")
-        q_title     = quest.get("title", "Quest")
-        q_objective = quest.get("objective", "")
-        q_victory   = quest.get("victory_condition", "")
-        q_defeat    = quest.get("defeat_condition", "")
-        q_cycles    = quest.get("cycles_played", 1)
+        q_type         = quest.get("type", "acumulação")
+        q_title        = quest.get("title", "Quest")
+        q_objective    = quest.get("objective", "")
+        q_victory      = quest.get("victory_condition", "")
+        q_defeat       = quest.get("defeat_condition", "")
+        q_cycles       = quest.get("cycles_played", 1)
+        q_cycles_total = quest.get("cycles_total", q_cycles)
+        q_cycle_current = min(q_cycles, q_cycles_total)
+
+        # Note for multi-cycle quests in progress
+        if q_cycles_total > 1 and q_cycle_current < q_cycles_total:
+            q_multicycle_note = (
+                f" — QUEST MULTI-CICLO EM ANDAMENTO: este é o ciclo {q_cycle_current} de {q_cycles_total}. "
+                "Avalie o progresso parcial — penalize menos por objetivos ainda não totalmente cumpridos, "
+                "pois o usuário ainda terá ciclos para completar a quest."
+            )
+        else:
+            q_multicycle_note = ""
+
+        # ── Recent study topics ──────────────────────────────────────────────
+        if recent_study_topics:
+            topic_lines = []
+            for t in recent_study_topics:
+                status = "✓ dominado" if t.get("mastered") else "em aprendizado"
+                topic_lines.append(f"  • {t['topic']} ({status}, ciclo {t.get('cycle', '?')})")
+            q_study_topics = "\n".join(topic_lines)
+        else:
+            q_study_topics = "  Nenhum material de estudo consultado ainda."
 
         # ── Actions summary — grouped by cycle with temporal labels ──────────
         _labels = {
@@ -732,7 +728,10 @@ class Engine:
             q_objective=q_objective,
             q_victory=q_victory,
             q_defeat=q_defeat,
-            q_cycles=q_cycles,
+            q_cycles_total=q_cycles_total,
+            q_cycle_current=q_cycle_current,
+            q_multicycle_note=q_multicycle_note,
+            q_study_topics=q_study_topics,
             actions_block=actions_block,
             portfolio_block=portfolio_block,
             c_risk=c_risk,
@@ -755,40 +754,21 @@ class Engine:
         Parameters
         ----------
         quest_type       : "acumulação" | "sobrevivência" | "evento"
-        user_profile     : {
-                             "name": str,
-                             "monthly_income": float,
-                             "monthly_expenses": float,
-                             "monthly_surplus": float,
-                             "risk_profile": str,      # declared at onboarding
-                             "knowledge_level": str,   # declared at onboarding
-                             "goal": str,
-                             "goal_amount": float,
-                             "goal_deadline_months": int,
-                           }
-        learning_context : {
-                             "last_score": int | None,
-                             "completed_quests": int,
-                             "main_weakness": str,
-                             "last_quest_type": str,
-                             "inferred_risk": str,          # AI-inferred, may differ from declared
-                             "inferred_level": str,         # AI-inferred, may differ from declared
-                             "recent_scores": list[int],    # last ≤5 quest scores
-                             "mastered_topics": list[str],  # topics the user has already mastered
-                             "portfolio_allocation": dict,  # {cash_pct, fixed_pct, stocks_pct}
-                             "current_net_worth": float,
-                           }
+        user_profile     : { name, monthly_income, monthly_expenses, monthly_surplus,
+                             risk_profile, knowledge_level, goal, goal_amount,
+                             goal_deadline_months }
+        learning_context : { last_score, completed_quests, main_weakness,
+                             last_quest_type, inferred_risk, inferred_level,
+                             recent_scores, mastered_topics, portfolio_allocation,
+                             current_net_worth, goal_urgency, recent_behavior,
+                             recent_study_topics, cycles_total_hint }
+                           New keys:
+                             recent_study_topics : list[dict] — [{topic, mastered, cycle}]
+                             cycles_total_hint   : int (1–3) — suggested quest duration
 
         Returns the raw text response from Bob. Expected to be valid JSON:
-
-        {
-          "title": str,
-          "context": str,
-          "objective": str,
-          "victory_condition": str,
-          "defeat_condition": str,
-          "initial_tip": str
-        }
+        { title, context, objective, victory_condition, defeat_condition,
+          initial_tip, cycles_total }
         """
         quest_type_rules = {
             "acumulação":    "O objetivo é acumular o máximo de lucro minimizando riscos. "
@@ -824,32 +804,53 @@ class Engine:
         goal_amount      = user_profile.get("goal_amount", 0.0)
         goal_deadline    = user_profile.get("goal_deadline_months", 0)
 
-        last_score       = learning_context.get("last_score")
-        completed_quests = learning_context.get("completed_quests", 0)
-        main_weakness    = learning_context.get("main_weakness", "não identificada")
-        last_quest_type  = learning_context.get("last_quest_type", "nenhuma")
-        inferred_risk    = learning_context.get("inferred_risk",  user_profile.get("risk_profile",    "moderado"))
-        inferred_level   = learning_context.get("inferred_level", user_profile.get("knowledge_level", "iniciante"))
-        recent_scores    = learning_context.get("recent_scores", [])
-        mastered_topics  = learning_context.get("mastered_topics", [])
-        alloc            = learning_context.get("portfolio_allocation", {})
-        current_nw       = learning_context.get("current_net_worth", 0.0)
-        goal_urgency     = learning_context.get("goal_urgency", {})
-        recent_behavior  = learning_context.get("recent_behavior", {})
+        last_score          = learning_context.get("last_score")
+        completed_quests    = learning_context.get("completed_quests", 0)
+        main_weakness       = learning_context.get("main_weakness", "não identificada")
+        last_quest_type     = learning_context.get("last_quest_type", "nenhuma")
+        inferred_risk       = learning_context.get("inferred_risk",  user_profile.get("risk_profile",    "moderado"))
+        inferred_level      = learning_context.get("inferred_level", user_profile.get("knowledge_level", "iniciante"))
+        recent_scores       = learning_context.get("recent_scores", [])
+        mastered_topics     = learning_context.get("mastered_topics", [])
+        alloc               = learning_context.get("portfolio_allocation", {})
+        current_nw          = learning_context.get("current_net_worth", 0.0)
+        goal_urgency        = learning_context.get("goal_urgency", {})
+        recent_behavior     = learning_context.get("recent_behavior", {})
+        recent_study_topics = learning_context.get("recent_study_topics", [])
+        cycles_total_hint   = learning_context.get("cycles_total_hint", 1)
 
         # ── score / difficulty line ───────────────────────────────────────────
         if last_score is None:
             score_line      = "Pontuação: (primeira quest)"
-            difficulty_hint = "É a primeira quest — use dificuldade introdutória e um objetivo simples e concreto."
-        elif last_score >= 75:
+            difficulty_hint = (
+                "É a primeira quest — use dificuldade introdutória, um objetivo simples e concreto "
+                "com 1-2 tipos de ativo apenas."
+            )
+        elif last_score >= 80:
             score_line      = f"Pontuação na última quest: {last_score}/100"
-            difficulty_hint = "O usuário está se saindo bem — aumente a dificuldade e introduza um conceito novo."
-        elif last_score < 50:
+            difficulty_hint = (
+                "Desempenho excelente — aumente a dificuldade consideravelmente: introduza restrições "
+                "adicionais (ex: porcentagem mínima em renda variável, múltiplos ativos), combine "
+                "objetivos (ex: acumular E manter reserva) e use metas mais agressivas."
+            )
+        elif last_score >= 65:
             score_line      = f"Pontuação na última quest: {last_score}/100"
-            difficulty_hint = "O usuário está com dificuldade — mantenha acessível e reforce a fraqueza principal."
+            difficulty_hint = (
+                "Bom desempenho — aumente a dificuldade moderadamente: adicione uma restrição extra "
+                "ou meta secundária, e introduza um conceito financeiro novo."
+            )
+        elif last_score < 45:
+            score_line      = f"Pontuação na última quest: {last_score}/100"
+            difficulty_hint = (
+                "O usuário está com dificuldade — mantenha acessível mas NÃO reduza abaixo do nível "
+                "mínimo do perfil inferido. Reforce a fraqueza principal com objetivo claro e direto."
+            )
         else:
             score_line      = f"Pontuação na última quest: {last_score}/100"
-            difficulty_hint = "Desempenho moderado — mantenha dificuldade similar, foque na fraqueza principal."
+            difficulty_hint = (
+                "Desempenho moderado — mantenha dificuldade similar mas adicione uma nova dimensão "
+                "de aprendizado (ex: liquidez, diversificação, gestão de carência)."
+            )
 
         # ── score trend ───────────────────────────────────────────────────────
         if len(recent_scores) >= 2:
@@ -871,6 +872,20 @@ class Engine:
         else:
             mastered_line = "Nenhum tema dominado ainda — qualquer foco educativo é válido."
 
+        # ── recent study topics section ───────────────────────────────────────
+        if recent_study_topics:
+            topics_lines = []
+            for t in recent_study_topics:
+                status = "✓ dominado" if t.get("mastered") else "em aprendizado"
+                topics_lines.append(f"  • {t['topic']} ({status}, ciclo {t.get('cycle', '?')})")
+            study_topics_section = (
+                "O usuário estudou recentemente os seguintes tópicos. "
+                "Priorize criar uma quest que exija a aplicação prática do(s) tema(s) mais recente(s):\n"
+                + "\n".join(topics_lines)
+            )
+        else:
+            study_topics_section = "Nenhum material de estudo consultado ainda."
+
         # ── portfolio context ─────────────────────────────────────────────────
         cash_pct   = alloc.get("cash_pct",   0.0)
         fixed_pct  = alloc.get("fixed_pct",  0.0)
@@ -882,6 +897,18 @@ class Engine:
             )
         else:
             portfolio_line = "Portfólio ainda não iniciado."
+
+        # ── duration hint ─────────────────────────────────────────────────────
+        _level_duration = {
+            "iniciante":      "1 ciclo (quest curta — objetivos simples e diretos)",
+            "intermediário":  "1 ou 2 ciclos (escolha conforme a complexidade do objetivo)",
+            "avançado":       "2 ou 3 ciclos (quests mais longas permitem objetivos compostos e acompanhamento de carência)",
+        }
+        duration_hint = (
+            f"Nível inferido: {inferred_level}. "
+            f"Duração sugerida: {_level_duration.get(inferred_level, '1 ciclo')}. "
+            f"VALOR A USAR EM cycles_total: {cycles_total_hint}."
+        )
 
         prompt = self._prompts.format(
             "quest", "generate_quest",
@@ -906,6 +933,7 @@ class Engine:
             urgency_months_remaining=goal_urgency.get("months_remaining", goal_deadline),
             urgency_required_saving=goal_urgency.get("required_monthly_saving", 0.0),
             urgency_on_track_label="Sim — ritmo de poupança é suficiente" if goal_urgency.get("on_track") else "Não — usuário precisa poupar mais para atingir a meta no prazo",
+            study_topics_section=study_topics_section,
             behavior_cycles_analyzed=recent_behavior.get("cycles_analyzed", 0),
             behavior_trade_count=recent_behavior.get("trade_count", 0),
             behavior_cash_hoard_cycles=recent_behavior.get("cash_hoard_cycles", 0),
@@ -918,5 +946,6 @@ class Engine:
             main_weakness=main_weakness,
             mastered_line=mastered_line,
             difficulty_hint=difficulty_hint,
+            duration_hint=duration_hint,
         )
         return self._bob.send_prompt(prompt)
