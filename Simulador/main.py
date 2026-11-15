@@ -1099,7 +1099,8 @@ class App(ctk.CTk):
         """Returns (creating if needed) the StudyLibrary for the current profile."""
         if self._study_library is None:
             user_id = self._profile.user_id if self._profile else "anonymous"
-            self._study_library = StudyLibrary(user_id=user_id, data_dir=".")
+            data_dir = str(Path(__file__).parent / "data" / "quizes")
+            self._study_library = StudyLibrary(user_id=user_id, data_dir=data_dir)
         return self._study_library
 
     def _simulator_performance(self) -> dict:

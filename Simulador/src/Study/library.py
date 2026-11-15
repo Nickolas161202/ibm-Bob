@@ -102,6 +102,8 @@ class StudyLibrary:
 
     def __init__(self, user_id: str, data_dir: str = "."):
         self.user_id = user_id
+        # Ensure the directory exists before constructing the path
+        os.makedirs(data_dir, exist_ok=True)
         self._path = os.path.join(data_dir, f"{user_id}_study.json")
         self._contents: list[StudyContent] = []
         self._load()
