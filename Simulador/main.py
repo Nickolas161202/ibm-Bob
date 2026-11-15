@@ -532,6 +532,11 @@ class App(ctk.CTk):
         if state == AppState.STUDY:
             lib = self._ensure_study_library()
 
+            # Seed the library with the first catalogue entry on first visit so
+            # the user always has at least one piece of content with a quiz.
+            if not lib.get_all():
+                self._generate_study_content()
+
             def on_request_topic(topic: str):
                 self._generate_study_content(requested_topic=topic)
                 # Refresh the current StudyPage in place if it is still active
