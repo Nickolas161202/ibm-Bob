@@ -951,56 +951,645 @@ class App(ctk.CTk):
             "last_quest_topics": [],
         }
 
-    def _generate_study_content(self, requested_topic: str | None = None):
-        """
-        Calls the AI engine to generate a new StudyContent and persists it.
-        Falls back gracefully if the AI engine is not available.
-        """
-        # TODO: re-enable AI calls when testing is done
-        # from src.Ai.engine import Engine as AiEngine
-        # from src.Ai.bob import Bob
-        # lib = self._ensure_study_library()
-        # profile_dict = { ... }
-        # try:
-        #     api_key = os.environ.get("BOB_API_KEY", "")
-        #     bob = Bob(email="", password=api_key)
-        #     bob.login()
-        #     ai = AiEngine(bob)
-        #     raw = ai.generate_study_content(...)
-        #     data = json.loads(raw)
-        #     lib.add(StudyContent(...))
-        # except Exception as e:
-        #     print(f"[STUDY] Falha ao gerar conteúdo via IA: {e}")
-
-        lib = self._ensure_study_library()
-        topic = requested_topic or "Reserva de Emergência"
-        content = StudyContent(
-            id=str(uuid.uuid4()),
-            topic=topic,
-            source_text=(
-                "A reserva de emergência é um valor guardado para cobrir imprevistos, "
-                "equivalente a 3–6 meses de despesas mensais."
+    # ------------------------------------------------------------------
+    # Catálogo estático de materiais de estudo
+    # Baseado em evidências da literatura de finanças pessoais e
+    # investimentos (referências: Scite.ai — Thaler & Sunstein 2008,
+    # Benartzi & Thaler 2001, Malkiel 2019, Bogle 2007, Lusardi & Mitchell
+    # 2014, Sharpe 1964, Markowitz 1952, entre outros).
+    # ------------------------------------------------------------------
+    _STUDY_CATALOGUE: list[dict] = [
+        {
+            "topic": "Reserva de Emergência",
+            "source_text": (
+                "A reserva de emergência é um colchão de liquidez recomendado para cobrir "
+                "despesas inesperadas sem recorrer a dívidas caras. A literatura de finanças "
+                "comportamentais (Thaler & Sunstein, 2008) mostra que a ausência de reserva "
+                "é um dos principais gatilhos de estresse financeiro e de decisões sub-ótimas "
+                "sob pressão. Estudos recomendam entre 3 e 6 meses de despesas mensais fixas, "
+                "alocados em ativos de alta liquidez e baixo risco (ex: Tesouro Selic, CDB de "
+                "liquidez diária ou fundo DI com taxa zero)."
             ),
-            adapted_text=(
-                f"Pense na reserva de emergência como seu escudo financeiro! "
-                f"Guarde de 3 a 6 meses dos seus gastos em um lugar seguro e de fácil acesso, "
-                f"como o Tesouro Selic ou um CDB de liquidez diária."
+            "adapted_text": (
+                "Pense na reserva de emergência como seu escudo financeiro!\n\n"
+                "Guarde de 3 a 6 meses dos seus gastos mensais em um lugar seguro e de fácil "
+                "acesso — Tesouro Selic ou CDB com liquidez diária são ótimas opções.\n\n"
+                "Sem ela, qualquer imprevisto (carro quebrado, demissão, problema de saúde) "
+                "pode te forçar a usar cartão de crédito ou empréstimo com juros altíssimos. "
+                "Monte a reserva antes de pensar em qualquer outro investimento."
             ),
-            quiz=[
+            "quiz": [
                 QuizQuestion(
                     question="Qual é o tamanho ideal de uma reserva de emergência?",
                     options=[
                         "1 mês de despesas",
                         "3 a 6 meses de despesas",
-                        "1 ano de renda",
+                        "1 ano de renda bruta",
                         "Não é necessário ter reserva",
                     ],
                     correct_index=1,
-                    explanation="A reserva de emergência deve cobrir de 3 a 6 meses de despesas.",
-                )
+                    explanation=(
+                        "3 a 6 meses de despesas mensais é o intervalo recomendado pela maior "
+                        "parte da literatura de finanças pessoais. Autônomos e quem tem renda "
+                        "variável devem mirar nos 6 meses."
+                    ),
+                ),
+                QuizQuestion(
+                    question="Qual é o melhor lugar para guardar a reserva de emergência?",
+                    options=[
+                        "Poupança com liquidez em 30 dias",
+                        "Ações de empresas sólidas",
+                        "Tesouro Selic ou CDB com liquidez diária",
+                        "Fundo imobiliário (FII)",
+                    ],
+                    correct_index=2,
+                    explanation=(
+                        "A reserva precisa estar em ativos com liquidez imediata e sem risco de "
+                        "perda. Tesouro Selic e CDB de liquidez diária atendem a esses critérios "
+                        "e ainda rendem mais do que a poupança tradicional."
+                    ),
+                ),
             ],
-            sim_score_at_creation=self._simulator_performance()["avg_score"],
-            created_cycle=self._engine.market.cycle if self._engine else 0,
+        },
+        {
+            "topic": "Juros Compostos",
+            "source_text": (
+                "Os juros compostos (Albert Einstein teria chamado de 'oitava maravilha do mundo') "
+                "são calculados sobre o montante acumulado, não apenas sobre o principal. "
+                "Matematicamente: M = P × (1 + i)^n. A pesquisa de Lusardi & Mitchell (2014, "
+                "Journal of Economic Literature) demonstra que a compreensão de juros compostos "
+                "é o indicador de literacia financeira mais fortemente correlacionado com "
+                "acumulação de riqueza ao longo da vida. Começar cedo amplifica drasticamente "
+                "o efeito — duplicar o prazo de investimento multiplica o resultado final de "
+                "forma exponencial, não linear."
+            ),
+            "adapted_text": (
+                "Juros compostos são os juros que rendem sobre juros — e é por isso que tempo "
+                "é o seu maior aliado nos investimentos!\n\n"
+                "Exemplo prático: R$ 1.000 a 1% ao mês:\n"
+                "• Após 12 meses → R$ 1.127\n"
+                "• Após 24 meses → R$ 1.270\n"
+                "• Após 60 meses → R$ 1.817\n\n"
+                "Quanto mais cedo você começa, menos precisa investir para chegar ao mesmo "
+                "resultado. Estudos mostram que quem começa a investir aos 25 anos chega à "
+                "aposentadoria com até 3× mais dinheiro do que quem começa aos 35, investindo "
+                "o mesmo valor mensal."
+            ),
+            "quiz": [
+                QuizQuestion(
+                    question="O que diferencia juros compostos de juros simples?",
+                    options=[
+                        "Juros compostos têm taxa maior",
+                        "Juros compostos incidem sobre o montante acumulado (principal + juros anteriores)",
+                        "Juros compostos só existem em investimentos de longo prazo",
+                        "Juros simples rendem mais no longo prazo",
+                    ],
+                    correct_index=1,
+                    explanation=(
+                        "Nos juros compostos, a cada período os juros são calculados sobre o "
+                        "total acumulado (principal + juros anteriores), gerando crescimento "
+                        "exponencial. Nos juros simples, a base é sempre o principal original."
+                    ),
+                ),
+                QuizQuestion(
+                    question=(
+                        "Por que começar a investir cedo faz tanta diferença nos juros compostos?"
+                    ),
+                    options=[
+                        "Porque as taxas de juros são maiores para jovens",
+                        "Porque o imposto de renda é menor para quem investe há mais tempo",
+                        "Porque o tempo amplia o efeito exponencial dos rendimentos reinvestidos",
+                        "Porque os bancos oferecem produtos exclusivos para investidores jovens",
+                    ],
+                    correct_index=2,
+                    explanation=(
+                        "Quanto maior o prazo (n), mais ciclos de reinvestimento ocorrem, "
+                        "ampliando o crescimento exponencialmente. Uma diferença de 10 anos "
+                        "no início pode mais do que dobrar o patrimônio final."
+                    ),
+                ),
+            ],
+        },
+        {
+            "topic": "Diversificação de Carteira",
+            "source_text": (
+                "A Teoria Moderna do Portfólio (Markowitz, 1952, Journal of Finance) demonstrou "
+                "matematicamente que combinar ativos com correlações baixas ou negativas reduz o "
+                "risco total da carteira sem necessariamente sacrificar o retorno esperado. "
+                "O risco específico (não-sistemático) pode ser virtualmente eliminado com ~15–20 "
+                "ativos descorrelacionados. Estudos posteriores (Statman, 1987) sugerem que a "
+                "diversificação completa requer entre 30 e 40 ações. Fundos de índice (ETFs) "
+                "permitem diversificação ampla com custos muito baixos."
+            ),
+            "adapted_text": (
+                "Não coloque todos os ovos na mesma cesta — esse ditado popular resume "
+                "perfeitamente a diversificação!\n\n"
+                "Ao distribuir seus investimentos entre diferentes tipos de ativos (renda fixa, "
+                "ações, FIIs, câmbio), você reduz o risco: se um ativo cai, os outros podem "
+                "compensar.\n\n"
+                "Dica prática: ETFs de índice (ex: BOVA11 no Brasil) já incluem dezenas de "
+                "ações de uma vez, com taxas baixas, e são ótimos para diversificar sem "
+                "precisar escolher empresa por empresa."
+            ),
+            "quiz": [
+                QuizQuestion(
+                    question="O que a diversificação de carteira permite reduzir?",
+                    options=[
+                        "O risco sistemático (de mercado)",
+                        "O risco específico (não-sistemático) dos ativos individuais",
+                        "A tributação sobre ganhos de capital",
+                        "A volatilidade do câmbio",
+                    ],
+                    correct_index=1,
+                    explanation=(
+                        "A diversificação elimina o risco específico de cada ativo (risco "
+                        "não-sistemático). O risco de mercado (sistemático), como crises "
+                        "econômicas globais, afeta todos os ativos e não pode ser diversificado."
+                    ),
+                ),
+                QuizQuestion(
+                    question=(
+                        "Qual ferramenta permite diversificar em dezenas de ações com um único "
+                        "investimento e baixas taxas?"
+                    ),
+                    options=[
+                        "CDB prefixado",
+                        "ETF de índice (ex: BOVA11)",
+                        "Tesouro IPCA+",
+                        "Fundo de previdência com taxa de carregamento",
+                    ],
+                    correct_index=1,
+                    explanation=(
+                        "ETFs (Exchange-Traded Funds) replicam índices de ações e permitem "
+                        "exposição a dezenas ou centenas de empresas com uma única compra, "
+                        "taxas de administração muito baixas e liquidez diária."
+                    ),
+                ),
+            ],
+        },
+        {
+            "topic": "Tesouro Direto",
+            "source_text": (
+                "O Tesouro Direto é um programa do Tesouro Nacional que permite a pessoas físicas "
+                "investir em títulos públicos federais pela internet desde 2002. Os principais "
+                "títulos são: Tesouro Selic (pós-fixado, acompanha a taxa básica de juros), "
+                "Tesouro Prefixado (taxa travada na compra) e Tesouro IPCA+ (proteção contra "
+                "inflação + taxa real). A literatura de finanças pessoais (Malkiel, 2019) destaca "
+                "títulos públicos como a base da alocação conservadora por seu risco soberano "
+                "(menor risco de crédito disponível no mercado doméstico) e liquidez diária "
+                "no caso do Tesouro Selic."
+            ),
+            "adapted_text": (
+                "O Tesouro Direto é uma das formas mais seguras de investir no Brasil, pois você "
+                "está emprestando dinheiro para o governo federal.\n\n"
+                "Tipos principais:\n"
+                "• Tesouro Selic → rende conforme a taxa Selic (ótimo para reserva de emergência)\n"
+                "• Tesouro Prefixado → você sabe exatamente quanto vai receber no vencimento\n"
+                "• Tesouro IPCA+ → protege seu dinheiro da inflação e ainda paga um juro real\n\n"
+                "Aplique a partir de R$ 30 e pague apenas 0,20% ao ano de taxa de custódia "
+                "(e zero taxa de corretagem nas principais corretoras)."
+            ),
+            "quiz": [
+                QuizQuestion(
+                    question="Qual título do Tesouro Direto é mais indicado para a reserva de emergência?",
+                    options=[
+                        "Tesouro Prefixado de longo prazo",
+                        "Tesouro IPCA+ com vencimento em 2045",
+                        "Tesouro Selic",
+                        "Tesouro Renda+",
+                    ],
+                    correct_index=2,
+                    explanation=(
+                        "O Tesouro Selic tem liquidez diária e valor de mercado praticamente "
+                        "sem oscilação, tornando-o ideal para a reserva de emergência. Os demais "
+                        "podem ter marcação a mercado e perdas se resgatados antes do vencimento."
+                    ),
+                ),
+                QuizQuestion(
+                    question="O que o Tesouro IPCA+ garante ao investidor?",
+                    options=[
+                        "Rentabilidade igual à taxa Selic",
+                        "Proteção contra a inflação mais uma taxa de juro real fixa",
+                        "Isenção de imposto de renda",
+                        "Liquidez diária sem perda de rentabilidade",
+                    ],
+                    correct_index=1,
+                    explanation=(
+                        "O Tesouro IPCA+ rende IPCA + taxa prefixada (ex: IPCA + 6% a.a.), "
+                        "preservando o poder de compra do investidor mesmo em cenários de "
+                        "inflação elevada."
+                    ),
+                ),
+            ],
+        },
+        {
+            "topic": "Renda Variável e Ações",
+            "source_text": (
+                "Ações representam frações do capital social de uma empresa. O retorno histórico "
+                "de longo prazo das ações supera o de renda fixa na maioria dos mercados (Siegel, "
+                "'Stocks for the Long Run', 2014). Contudo, a volatilidade de curto prazo é alta "
+                "— crises podem gerar quedas de 30–50% em meses. A pesquisa comportamental "
+                "(Benartzi & Thaler, 2001, American Economic Review) mostrou que investidores "
+                "individuais tendem a vender no pior momento (aversão a perdas) e comprar nos "
+                "picos (excesso de confiança), destruindo retorno. Estratégias sistemáticas "
+                "(aportes regulares, rebalanceamento periódico) mitigam esses vieses."
+            ),
+            "adapted_text": (
+                "Investir em ações significa se tornar sócio de uma empresa — se ela crescer, "
+                "você lucra; se ela tiver problemas, o valor da ação cai.\n\n"
+                "Pontos-chave:\n"
+                "• Ações têm o maior potencial de retorno no longo prazo, mas também maior risco\n"
+                "• Nunca invista em ações dinheiro que você pode precisar em menos de 3–5 anos\n"
+                "• Aporte regularmente (mesmo pouco) em vez de tentar 'acertar o momento certo'\n"
+                "• Diversifique: nunca coloque mais de 10% em uma única empresa\n\n"
+                "Estudos mostram que a maioria dos investidores amadores perde para o índice "
+                "porque reage à emoção, não à lógica. ETFs de índice são uma alternativa "
+                "inteligente para quem está começando."
+            ),
+            "quiz": [
+                QuizQuestion(
+                    question=(
+                        "Qual é o maior erro comportamental que investidores individuais cometem "
+                        "ao investir em ações, segundo a pesquisa de Benartzi & Thaler (2001)?"
+                    ),
+                    options=[
+                        "Diversificar demais a carteira",
+                        "Vender nos momentos de queda e comprar nos momentos de alta (aversão a perdas)",
+                        "Manter as ações por tempo demais",
+                        "Reinvestir os dividendos",
+                    ],
+                    correct_index=1,
+                    explanation=(
+                        "A aversão a perdas leva investidores a vender em pânico nas quedas "
+                        "(realizando o prejuízo) e a comprar exuberantes nas altas (pagando caro). "
+                        "Aportes sistemáticos e regulares são a melhor defesa contra esses vieses."
+                    ),
+                ),
+                QuizQuestion(
+                    question="Por que ações são mais indicadas para o longo prazo?",
+                    options=[
+                        "Porque pagam juros mensais garantidos",
+                        "Porque são isentas de imposto de renda",
+                        "Porque a volatilidade de curto prazo se dilui ao longo do tempo e os retornos históricos superam a renda fixa",
+                        "Porque o governo garante o capital investido",
+                    ],
+                    correct_index=2,
+                    explanation=(
+                        "No curto prazo, as ações podem cair muito. No longo prazo, os retornos "
+                        "históricos de mercados acionários superam consistentemente os de renda "
+                        "fixa, e a volatilidade se dilui com o tempo."
+                    ),
+                ),
+            ],
+        },
+        {
+            "topic": "Fundos Imobiliários (FIIs)",
+            "source_text": (
+                "Fundos de Investimento Imobiliário (FIIs) são veículos coletivos que investem "
+                "em imóveis (shoppings, galpões logísticos, escritórios, hospitais) ou em títulos "
+                "imobiliários (CRIs, LCIs). Negociados em bolsa, oferecem liquidez que imóveis "
+                "físicos não têm. Os rendimentos distribuídos mensalmente (mínimo 95% do lucro "
+                "caixa) são isentos de IR para pessoa física, contanto que o fundo tenha mais "
+                "de 50 cotistas e as cotas sejam negociadas em bolsa (Lei nº 11.033/2004). "
+                "O risco inclui vacância, inadimplência e variação do mercado imobiliário."
+            ),
+            "adapted_text": (
+                "FIIs permitem que você invista no mercado imobiliário com pouco dinheiro "
+                "(a partir de ~R$ 10 por cota) e receba aluguéis mensais diretamente na sua "
+                "conta!\n\n"
+                "Vantagens:\n"
+                "• Renda mensal isenta de imposto de renda para pessoa física\n"
+                "• Liquidez: você pode vender as cotas na bolsa a qualquer momento\n"
+                "• Diversificação: um único FII já pode incluir dezenas de imóveis\n\n"
+                "Fique atento à taxa de vacância (imóveis desocupados) e ao tipo de fundo: "
+                "FIIs de tijolo (imóveis físicos) ou de papel (títulos imobiliários como CRI)."
+            ),
+            "quiz": [
+                QuizQuestion(
+                    question="Qual é a vantagem tributária dos rendimentos distribuídos por FIIs para pessoa física?",
+                    options=[
+                        "Alíquota reduzida de 10%",
+                        "Isenção total de imposto de renda sobre os rendimentos distribuídos",
+                        "Dedução no imposto de renda anual",
+                        "Alíquota de 15% com desconto na fonte",
+                    ],
+                    correct_index=1,
+                    explanation=(
+                        "Os rendimentos mensais distribuídos por FIIs listados em bolsa com mais "
+                        "de 50 cotistas são isentos de IR para pessoa física, tornando-os "
+                        "atraentes para quem busca renda passiva."
+                    ),
+                ),
+                QuizQuestion(
+                    question="O que é taxa de vacância em um FII de tijolo?",
+                    options=[
+                        "A taxa de administração cobrada pelo gestor",
+                        "O percentual de imóveis desocupados (sem inquilino) no portfólio do fundo",
+                        "A rentabilidade esperada do fundo",
+                        "O desconto em relação ao valor patrimonial",
+                    ],
+                    correct_index=1,
+                    explanation=(
+                        "Vacância indica o percentual de área locável desocupada. Quanto maior "
+                        "a vacância, menor a receita de aluguéis e, consequentemente, menor o "
+                        "rendimento distribuído aos cotistas."
+                    ),
+                ),
+            ],
+        },
+        {
+            "topic": "Vieses Comportamentais nos Investimentos",
+            "source_text": (
+                "A Economia Comportamental (Kahneman & Tversky, 1979, Econometrica; Thaler, "
+                "Nobel 2017) identificou padrões sistemáticos de irracionalidade em decisões "
+                "financeiras. Os principais vieses documentados são: aversão a perdas (perdas "
+                "doem ~2× mais do que ganhos equivalentes alegram), excesso de confiança "
+                "(superestimação da própria capacidade de selecionar ativos), viés de ancoragem "
+                "(dependência excessiva do preço de compra), comportamento de manada (seguir a "
+                "multidão) e desconto hiperbólico (preferência por recompensas imediatas "
+                "sobre benefícios futuros maiores)."
+            ),
+            "adapted_text": (
+                "Nosso cérebro não foi feito para investir — ele reage às emoções do momento, "
+                "não à lógica de longo prazo. Conhecer seus vieses é o primeiro passo para "
+                "superá-los!\n\n"
+                "Principais armadilhas mentais:\n"
+                "• Aversão a perdas: você sofre mais com uma perda de R$ 100 do que se alegra "
+                "com um ganho de R$ 100 → evita vender prejuízo e realiza o ganho cedo demais\n"
+                "• Excesso de confiança: acha que sabe mais do que o mercado → opera demais e paga taxas desnecessárias\n"
+                "• Comportamento de manada: compra quando todo mundo compra (pico) e vende quando todo mundo vende (fundo)\n\n"
+                "Solução: automatize seus aportes, defina uma estratégia e não a altere por emoção."
+            ),
+            "quiz": [
+                QuizQuestion(
+                    question=(
+                        "De acordo com Kahneman & Tversky, quanto as perdas pesam emocionalmente "
+                        "em comparação a ganhos de mesmo valor?"
+                    ),
+                    options=[
+                        "Igual — ganhos e perdas têm o mesmo peso emocional",
+                        "Perdas pesam cerca de 2× mais do que ganhos equivalentes",
+                        "Ganhos pesam mais porque são motivadores",
+                        "Depende do perfil de risco do investidor",
+                    ],
+                    correct_index=1,
+                    explanation=(
+                        "A Teoria do Prospecto (Kahneman & Tversky, 1979) demonstrou que a dor "
+                        "de uma perda é psicologicamente cerca de 2× maior do que o prazer de "
+                        "um ganho equivalente — o que explica decisões irracionais como manter "
+                        "posições perdedoras indefinidamente."
+                    ),
+                ),
+                QuizQuestion(
+                    question="Qual estratégia ajuda a combater o viés do comportamento de manada?",
+                    options=[
+                        "Acompanhar notícias financeiras diariamente para decidir quando comprar",
+                        "Investir apenas em momentos de alta do mercado",
+                        "Automatizar aportes periódicos com valor fixo, independentemente do mercado",
+                        "Concentrar o capital em poucos ativos de alta convicção",
+                    ],
+                    correct_index=2,
+                    explanation=(
+                        "Aportes automáticos e regulares (Dollar-Cost Averaging) eliminam a "
+                        "tentação de 'acertar o momento certo' e reduzem o impacto emocional "
+                        "das flutuações de mercado, resultando em preço médio mais vantajoso."
+                    ),
+                ),
+            ],
+        },
+        {
+            "topic": "Planejamento de Aposentadoria",
+            "source_text": (
+                "Pesquisas de Lusardi & Mitchell (2011, American Economic Review) demonstram que "
+                "a literacia financeira está fortemente correlacionada com o planejamento de "
+                "aposentadoria e a acumulação de riqueza. No Brasil, a Previdência Social (INSS) "
+                "tem teto de benefício limitado (R$ 7.786,02 em 2024), tornando a previdência "
+                "complementar essencial para quem almeja manter o padrão de vida. Opções: PGBL "
+                "(dedução no IR, tributação na saída sobre o total) e VGBL (sem dedução, "
+                "tributação só sobre rendimentos). A tabela regressiva do IR favorece resgates "
+                "após 10 anos (alíquota mínima de 10%)."
+            ),
+            "adapted_text": (
+                "Quanto mais cedo você começar a poupar para a aposentadoria, menos precisará "
+                "guardar por mês — os juros compostos farão o trabalho pesado!\n\n"
+                "Pontos essenciais:\n"
+                "• O teto do INSS é ~R$ 7.786 — se você ganha mais, precisará complementar\n"
+                "• PGBL: indicado para quem declara IR completo (deduz até 12% da renda bruta)\n"
+                "• VGBL: indicado para quem declara IR simplificado ou já maximizou o PGBL\n"
+                "• Escolha sempre a tabela regressiva (10% após 10 anos) se o objetivo for longo prazo\n\n"
+                "Regra prática: invista pelo menos 15% da sua renda mensal para a aposentadoria."
+            ),
+            "quiz": [
+                QuizQuestion(
+                    question="Qual produto de previdência privada permite deduzir até 12% da renda bruta no IR?",
+                    options=[
+                        "VGBL",
+                        "PGBL",
+                        "CDB de longo prazo",
+                        "Tesouro IPCA+",
+                    ],
+                    correct_index=1,
+                    explanation=(
+                        "O PGBL (Plano Gerador de Benefício Livre) permite deduzir contribuições "
+                        "de até 12% da renda bruta tributável na declaração completa do IR. "
+                        "Na saída, o IR incide sobre o valor total resgatado (principal + rendimentos)."
+                    ),
+                ),
+                QuizQuestion(
+                    question=(
+                        "Na tabela regressiva de IR para previdência privada, qual é a alíquota "
+                        "mínima e após quanto tempo ela é atingida?"
+                    ),
+                    options=[
+                        "5% após 5 anos",
+                        "10% após 10 anos",
+                        "15% após 7 anos",
+                        "Zero após 20 anos",
+                    ],
+                    correct_index=1,
+                    explanation=(
+                        "Na tabela regressiva, a alíquota começa em 35% (até 2 anos) e cai "
+                        "progressivamente até 10% para recursos com mais de 10 anos, tornando "
+                        "a previdência privada muito eficiente tributariamente no longo prazo."
+                    ),
+                ),
+            ],
+        },
+        {
+            "topic": "Controle de Dívidas e Taxa de Juros",
+            "source_text": (
+                "O custo do crédito no Brasil é um dos mais altos do mundo. Em 2024, o rotativo "
+                "do cartão de crédito ultrapassou 400% a.a. e o cheque especial frequentemente "
+                "supera 100% a.a. A pesquisa comportamental (Stango & Zinman, 2009, Journal of "
+                "Finance) demonstra que consumidores subestimam sistematicamente o custo real "
+                "do crédito parcelado. A estratégia 'avalanche' (priorizar a dívida de maior "
+                "juros) é matematicamente ótima; a estratégia 'bola de neve' (priorizar a menor "
+                "dívida) tem evidências comportamentais de maior adesão."
+            ),
+            "adapted_text": (
+                "Dívida cara destrói seu patrimônio muito mais rápido do que qualquer "
+                "investimento pode construí-lo. Eliminar dívidas de alto custo é o investimento "
+                "com maior retorno garantido que você pode fazer!\n\n"
+                "Regra de ouro: se a dívida tem juros maiores do que o rendimento do seu "
+                "investimento, pague a dívida primeiro.\n\n"
+                "Duas estratégias para sair das dívidas:\n"
+                "• Avalanche: pague primeiro a dívida com maior taxa de juros (economiza mais dinheiro)\n"
+                "• Bola de neve: pague primeiro a menor dívida (gera motivação para continuar)\n\n"
+                "Nunca use o rotativo do cartão de crédito — pague sempre o valor total da fatura."
+            ),
+            "quiz": [
+                QuizQuestion(
+                    question=(
+                        "Na estratégia 'avalanche' de pagamento de dívidas, qual dívida deve "
+                        "ser priorizada?"
+                    ),
+                    options=[
+                        "A dívida com o maior saldo devedor",
+                        "A dívida com a maior taxa de juros",
+                        "A dívida com o menor prazo restante",
+                        "A dívida mais antiga",
+                    ],
+                    correct_index=1,
+                    explanation=(
+                        "A estratégia avalanche prioriza a dívida com maior taxa de juros, "
+                        "minimizando o custo total pago. É matematicamente superior à bola "
+                        "de neve, embora ambas sejam válidas dependendo do perfil do devedor."
+                    ),
+                ),
+                QuizQuestion(
+                    question="Por que nunca se deve usar o rotativo do cartão de crédito?",
+                    options=[
+                        "Porque gera pontos negativos no score de crédito",
+                        "Porque os juros do rotativo ultrapassam 400% ao ano no Brasil",
+                        "Porque o banco pode cancelar o cartão",
+                        "Porque reduz o limite de crédito disponível",
+                    ],
+                    correct_index=1,
+                    explanation=(
+                        "O rotativo do cartão de crédito é a modalidade de crédito mais cara "
+                        "do Brasil, com taxas que podem superar 400% ao ano. Uma dívida de "
+                        "R$ 1.000 no rotativo pode se transformar em mais de R$ 5.000 em 12 meses."
+                    ),
+                ),
+            ],
+        },
+        {
+            "topic": "ETFs e Fundos de Índice",
+            "source_text": (
+                "John Bogle (fundador da Vanguard, 1975) popularizou os fundos de índice como "
+                "alternativa superior à gestão ativa para o investidor individual. Dados "
+                "extensivos do SPIVA (S&P Indices vs. Active) mostram que mais de 90% dos "
+                "fundos ativos não superam o índice de referência em horizontes de 15+ anos, "
+                "principalmente devido aos custos de gestão. ETFs (Exchange-Traded Funds) "
+                "combinam a diversificação de fundos de índice com liquidez intraday de ações, "
+                "taxas de administração muito baixas (0,05%–0,30% a.a. no Brasil) e "
+                "transparência de carteira."
+            ),
+            "adapted_text": (
+                "ETFs são fundos que replicam índices (como o Ibovespa ou o S&P 500) e são "
+                "negociados na bolsa como ações. São um dos produtos favoritos de investidores "
+                "inteligentes ao redor do mundo!\n\n"
+                "Por que ETFs são poderosos:\n"
+                "• Diversificação instantânea: um único ETF pode incluir 50, 100 ou 500 empresas\n"
+                "• Custo baixíssimo: taxas de 0,05% a 0,30% ao ano, muito menos que fundos ativos\n"
+                "• Transparência: você sabe exatamente em quais empresas está investindo\n\n"
+                "Estudos mostram que mais de 90% dos fundos de gestão ativa não batem o índice "
+                "no longo prazo. Muitas vezes, o simples é o melhor."
+            ),
+            "quiz": [
+                QuizQuestion(
+                    question="O que diferencia um ETF de um fundo de investimento tradicional?",
+                    options=[
+                        "ETFs só investem em renda fixa",
+                        "ETFs são negociados em bolsa como ações, têm liquidez intraday e geralmente taxas menores",
+                        "ETFs garantem rentabilidade superior à renda fixa",
+                        "ETFs são exclusivos para investidores qualificados",
+                    ],
+                    correct_index=1,
+                    explanation=(
+                        "ETFs são negociados na bolsa durante o horário de pregão (liquidez "
+                        "intraday), têm taxas de administração muito baixas e carteira "
+                        "transparente. Fundos tradicionais têm cotas com liquidez em D+1 ou mais."
+                    ),
+                ),
+                QuizQuestion(
+                    question=(
+                        "Segundo dados do SPIVA, qual percentual de fundos de gestão ativa "
+                        "supera o índice de referência em horizontes acima de 15 anos?"
+                    ),
+                    options=[
+                        "Cerca de 50% — metade bate o índice",
+                        "Cerca de 70%",
+                        "Menos de 10%",
+                        "Aproximadamente 30%",
+                    ],
+                    correct_index=2,
+                    explanation=(
+                        "Dados históricos do SPIVA mostram consistentemente que menos de 10% "
+                        "dos fundos ativos superam seu índice de referência em períodos longos "
+                        "(15+ anos), principalmente devido aos custos de gestão e corretagem."
+                    ),
+                ),
+            ],
+        },
+    ]
+
+    def _generate_study_content(self, requested_topic: str | None = None):
+        """
+        Selects a StudyContent from the curated catalogue and persists it.
+        If the user requests a specific topic, the best matching entry is used;
+        otherwise the next uncovered topic in the catalogue is chosen.
+        Topics already covered in the library are skipped to avoid duplicates.
+        Falls back to the AI engine (when re-enabled) for topics not in the catalogue.
+        """
+        # TODO: re-enable AI calls when testing is done
+        # from src.Ai.engine import Engine as AiEngine
+        # from src.Ai.bob import Bob
+        # ...
+
+        lib = self._ensure_study_library()
+        covered = set(lib.covered_topics())
+        cycle   = self._engine.market.cycle if self._engine else 0
+        avg     = self._simulator_performance()["avg_score"]
+
+        # --- pick catalogue entry -------------------------------------------
+        entry: dict | None = None
+
+        if requested_topic:
+            # exact match first, then case-insensitive substring
+            norm = requested_topic.strip().lower()
+            for e in self._STUDY_CATALOGUE:
+                if e["topic"].lower() == norm:
+                    entry = e
+                    break
+            if entry is None:
+                for e in self._STUDY_CATALOGUE:
+                    if norm in e["topic"].lower() or e["topic"].lower() in norm:
+                        entry = e
+                        break
+
+        if entry is None:
+            # pick the first catalogue topic not yet covered
+            for e in self._STUDY_CATALOGUE:
+                if e["topic"] not in covered:
+                    entry = e
+                    break
+
+        if entry is None:
+            # all catalogue topics covered — cycle from the beginning
+            entry = self._STUDY_CATALOGUE[
+                len(covered) % len(self._STUDY_CATALOGUE)
+            ]
+
+        # --- build StudyContent ---------------------------------------------
+        content = StudyContent(
+            id=str(uuid.uuid4()),
+            topic=entry["topic"],
+            source_text=entry["source_text"],
+            adapted_text=entry["adapted_text"],
+            quiz=entry["quiz"],
+            sim_score_at_creation=avg,
+            created_cycle=cycle,
             requested_by_user=requested_topic is not None,
         )
         lib.add(content)
