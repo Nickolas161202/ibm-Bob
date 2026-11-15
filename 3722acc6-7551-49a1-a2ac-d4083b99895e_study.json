@@ -1,0 +1,61 @@
+[
+  {
+    "id": "0aac82ff-165f-4fae-93d9-7b35a752ce82",
+    "topic": "investimentos de baixo risco",
+    "source_text": "A reserva de emergência é um valor guardado para cobrir imprevistos, equivalente a 3–6 meses de despesas mensais.",
+    "adapted_text": "Pense na reserva de emergência como seu escudo financeiro! Guarde de 3 a 6 meses dos seus gastos em um lugar seguro e de fácil acesso, como o Tesouro Selic ou um CDB de liquidez diária.",
+    "quiz": [
+      {
+        "question": "Qual é o tamanho ideal de uma reserva de emergência?",
+        "options": [
+          "1 mês de despesas",
+          "3 a 6 meses de despesas",
+          "1 ano de renda",
+          "Não é necessário ter reserva"
+        ],
+        "correct_index": 1,
+        "explanation": "A reserva de emergência deve cobrir de 3 a 6 meses de despesas."
+      }
+    ],
+    "sim_score_at_creation": 0.0,
+    "created_cycle": 0,
+    "mastered": false,
+    "requested_by_user": true,
+    "quiz_results": []
+  },
+  {
+    "id": "92d552fd-f297-46a0-b3dc-19f08fe376e3",
+    "topic": "Reserva de Emergência",
+    "source_text": "A reserva de emergência é um colchão de liquidez recomendado para cobrir despesas inesperadas sem recorrer a dívidas caras. A literatura de finanças comportamentais (Thaler & Sunstein, 2008) mostra que a ausência de reserva é um dos principais gatilhos de estresse financeiro e de decisões sub-ótimas sob pressão. Estudos recomendam entre 3 e 6 meses de despesas mensais fixas, alocados em ativos de alta liquidez e baixo risco (ex: Tesouro Selic, CDB de liquidez diária ou fundo DI com taxa zero).",
+    "adapted_text": "Pense na reserva de emergência como seu escudo financeiro!\n\nGuarde de 3 a 6 meses dos seus gastos mensais em um lugar seguro e de fácil acesso — Tesouro Selic ou CDB com liquidez diária são ótimas opções.\n\nSem ela, qualquer imprevisto (carro quebrado, demissão, problema de saúde) pode te forçar a usar cartão de crédito ou empréstimo com juros altíssimos. Monte a reserva antes de pensar em qualquer outro investimento.",
+    "quiz": [
+      {
+        "question": "Qual é o tamanho ideal de uma reserva de emergência?",
+        "options": [
+          "1 mês de despesas",
+          "3 a 6 meses de despesas",
+          "1 ano de renda bruta",
+          "Não é necessário ter reserva"
+        ],
+        "correct_index": 1,
+        "explanation": "3 a 6 meses de despesas mensais é o intervalo recomendado pela maior parte da literatura de finanças pessoais. Autônomos e quem tem renda variável devem mirar nos 6 meses."
+      },
+      {
+        "question": "Qual é o melhor lugar para guardar a reserva de emergência?",
+        "options": [
+          "Poupança com liquidez em 30 dias",
+          "Ações de empresas sólidas",
+          "Tesouro Selic ou CDB com liquidez diária",
+          "Fundo imobiliário (FII)"
+        ],
+        "correct_index": 2,
+        "explanation": "A reserva precisa estar em ativos com liquidez imediata e sem risco de perda. Tesouro Selic e CDB de liquidez diária atendem a esses critérios e ainda rendem mais do que a poupança tradicional."
+      }
+    ],
+    "sim_score_at_creation": 0.0,
+    "created_cycle": 0,
+    "mastered": false,
+    "requested_by_user": true,
+    "quiz_results": []
+  }
+]
