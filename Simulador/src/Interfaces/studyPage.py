@@ -182,37 +182,44 @@ class StudyPage(ctk.CTkFrame):
         inner.grid_columnconfigure(1, weight=1)
 
         # ícone temático
-        ctk.CTkLabel(
+        icon_lbl = ctk.CTkLabel(
             inner, text="📖", font=ctk.CTkFont(size=24), width=44,
-        ).grid(row=0, column=0, rowspan=2, padx=(16, 10), pady=10)
+        )
+        icon_lbl.grid(row=0, column=0, rowspan=2, padx=(16, 10), pady=10)
 
         # título
-        ctk.CTkLabel(
+        title_lbl = ctk.CTkLabel(
             inner,
             text=content.topic,
             font=ctk.CTkFont(size=14, weight="bold"),
             anchor="w",
-        ).grid(row=0, column=1, padx=(0, 8), pady=(12, 1), sticky="w")
+        )
+        title_lbl.grid(row=0, column=1, padx=(0, 8), pady=(12, 1), sticky="w")
 
         # subtítulo: tentativas + badge
-        sub_text = f"{attempts} tentativa(s) de quiz"
-        ctk.CTkLabel(
+        sub_lbl = ctk.CTkLabel(
             inner,
-            text=sub_text,
+            text=f"{attempts} tentativa(s) de quiz",
             font=ctk.CTkFont(size=11),
             text_color="gray",
             anchor="w",
-        ).grid(row=1, column=1, padx=(0, 8), pady=(1, 12), sticky="w")
+        )
+        sub_lbl.grid(row=1, column=1, padx=(0, 8), pady=(1, 12), sticky="w")
 
         # badge de status
-        ctk.CTkLabel(
+        badge_lbl = ctk.CTkLabel(
             inner,
             text=badge,
             font=ctk.CTkFont(size=12, weight="bold"),
             text_color=badge_color,
             anchor="e",
             width=100,
-        ).grid(row=0, column=2, rowspan=2, padx=(0, 16))
+        )
+        badge_lbl.grid(row=0, column=2, rowspan=2, padx=(0, 16))
+
+        # Encaminha cliques no overlay e nos filhos para o botão
+        for widget in (inner, icon_lbl, title_lbl, sub_lbl, badge_lbl):
+            widget.bind("<Button-1>", lambda e, c=content: self._open_content(c))
 
     def _on_request_click(self):
         topic = self._topic_entry.get().strip()

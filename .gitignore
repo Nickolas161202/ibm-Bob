@@ -20,3 +20,8 @@ __pycache__/
 profiles/
 my_key.json
 Simulador/Readme.md
+
+# Study quiz data (generated per-user, not tracked)
+Simulador/data/quizes/
+Simulador/*_study.json
+*_study.json
